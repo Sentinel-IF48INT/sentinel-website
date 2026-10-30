@@ -1,0 +1,50 @@
+PROJECT SENTINEL: MASTER KNOWLEDGE BASE & ONBOARDING DOCUMENT
+
+1. Project Overview & Vision
+* Name: Sentinel: A Geopolitical Travel Safety Advisor Website[cite: 1, 2, 3].
+* Mission: To help travelers access reliable safety, visa, and emergency information in one centralized platform, reducing information overload and simplifying travel safety decisions[cite: 1, 3, 4].
+* Current Phase: Transitioning from the Software Requirements (SRS) and Design (SWDD) phases into the "Software Implementation and Testing" course MVP phase[cite: 1, 2, 4].
+
+2. Revised Scope (The MVP)
+The project scope has been intentionally aggressively reduced to focus purely on the core traveler experience and flawless technical execution[cite: 4, 6]. 
+* Features Kept (Core MVP):
+  * Destination Search & Profile (UC-1, UC-10)[cite: 4].
+  * Safety Alerts & Emergency Contacts (UC-2)[cite: 4].
+  * Interactive Risk Map Visualization (UC-7)[cite: 4].
+  * Basic User Authentication & Saved Reminders (UC-5, UC-8, UC-15)[cite: 4].
+* Features Cut (Legacy Requirements Removed):
+  * The Data Verification Workflow (UC-11) is removed; data will be handled via automated APIs[cite: 4, 5].
+  * The Route Planning Module (UC-14) is removed to avoid distracting algorithmic complexity[cite: 4].
+  * Multi-Role Authentication is reduced; the Travel Agency Partner, Journalist, and Data Analyst roles are entirely dropped[cite: 4].
+
+3. User Roles
+* Traveler (Standard User): Individuals who travel internationally and seek to understand the safety conditions, view real-time maps, receive alerts, and save safety reminders[cite: 1, 4].
+* Administrator (System Admin): Responsible for maintaining the system's database, managing user accounts, and overseeing automated data connections[cite: 1, 4].
+
+4. Data & Implementation Strategy (The "Seed Data" Approach)
+To demonstrate successful implementation without the burden of global data collection, Sentinel uses a restricted, highly curated dataset[cite: 6].
+* Locked Origin Passport: The system hardcodes the origin passport as "Indonesian Citizen" to eliminate complex cross-border visa calculation logic[cite: 6, 7].
+* 15-Country Whitelist: The database is limited to a benchmark dataset of 15 curated destinations that trigger specific UI states[cite: 6, 7]. For example: Japan (Low Risk), France (Elevated Risk), and Mali (Critical Risk)[cite: 6, 7].
+* Automated API Fetching: A Python/Django script will run periodically to fetch JSON/XML data from a free external API (e.g., US State Department Travel Advisories) and update the Destinations and SafetyAlerts tables only for the 15 whitelisted countries[cite: 5, 7].
+* Edge Case Handling: If a user searches for a destination outside the 15 whitelisted countries, the system will gracefully trigger a pre-designed "Alternative Flow: No Results Found" fallback UI to demonstrate robust error handling[cite: 6, 8, 11].
+
+5. Technology Stack
+* Backend: Python 3.11 (or the most updated stable version) via the Django framework[cite: 9, 12].
+* Frontend: JavaScript ES6 for interactivity, HTML, and Tailwind CSS for UI component construction[cite: 9, 12].
+* Database: PostgreSQL (selected for its compatibility with Django ORM and support for geospatial data)[cite: 9, 10].
+* Mapping UI: Leaflet.js will handle the interactive geospatial risk map overlays[cite: 9, 12].
+* Design Tool: Figma (used during the HCI phase for wireframing and prototyping)[cite: 9, 11].
+
+6. UI/UX & Design Principles (HCI Guidelines)
+* Visual Hierarchy & Gestalt: The interface utilizes proximity (grouping threat matrices), similarity (consistent color codes), and continuity (fixed bottom navigation) to make data instantly recognizable[cite: 3].
+* Accessibility & Color: The primary brand colors are greenish-white (#F9FBFA), teal (#00968A), and dark blue (#021B43)[cite: 3]. Risk severity is indicated by Red, Orange, and Yellow, with a strong emphasis on maintaining high contrast for colorblind accessibility[cite: 3].
+* Map Clarity: The interactive map must use clear, color-coded overlays with legible legends spanning both positive (safe) and negative (danger) indicators to avoid ambiguity[cite: 3].
+
+7. System Architecture
+* Pattern: Model-View-Controller (MVC)[cite: 2].
+* Core Database Tables: Users (and sub-types), Destinations, SafetyAlerts, and SafetyReminders[cite: 2, 5, 11].
+
+8. Development Roadmap
+1. Database Setup: Configure PostgreSQL, set up the Django ORM, create core tables, and curate the 15 benchmark countries[cite: 10, 11].
+2. UI Construction: Build the HTML/Tailwind forms for Authentication, Search ("No Results" fallback), the Leaflet.js interactive map, and the Destination Profile[cite: 11, 12].
+3. Backend Connectivity: Write the Django backend logic to connect the database to the authentication UI, implement search/filter logic, parse external APIs for the safety alerts, and manage the save/retrieve logic for user reminders[cite: 12, 13].

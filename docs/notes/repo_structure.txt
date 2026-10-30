@@ -1,0 +1,48 @@
+sentinel-mvp/
+├── .gitignore                  # Ignores local environment files, DB credentials, and __pycache__
+├── README.md                   # Setup guide, API script instructions, and evaluator testing notes
+├── requirements.txt            # Python 3.11 dependencies (Django, psycopg2 for PostgreSQL, etc.)[cite: 9, 10, 12]
+├── manage.py                   # Django execution script
+│
+├── docs/                       # Legacy course documents for evaluators to cross-reference
+│   ├── SRS_SKPL.pdf            # Software Requirements Specification[cite: 1]
+│   ├── SWDD_DPPL.pdf           # Software Design Description[cite: 2]
+│   └── HCI_Presentation.pdf    # UI/UX design and accessibility guidelines[cite: 3]
+│
+├── sentinel_core/              # Main Django configuration folder
+│   ├── __init__.py
+│   ├── settings.py             # Database connections (PostgreSQL) and template configurations[cite: 9, 10]
+│   ├── urls.py                 # Main URL routing for the whole website
+│   └── wsgi.py
+│
+├── apps/                       # Modularized MVP backend logic[cite: 4]
+│   │
+│   ├── users/                  # Handles Traveler and Administrator roles[cite: 4]
+│   │   ├── models.py           # User profiles and Saved Reminders table[cite: 4, 11, 13]
+│   │   ├── views.py            # Authentication, login, and dashboard logic[cite: 12]
+│   │   └── urls.py
+│   │
+│   └── destinations/           # Handles the 15-country whitelist, map, and alerts[cite: 6, 7, 11]
+│       ├── models.py           # Destinations and SafetyAlerts database tables[cite: 5, 11]
+│       ├── views.py            # Search logic, risk map data, and detail views[cite: 11, 12]
+│       ├── urls.py
+│       └── management/
+│           └── commands/
+│               └── fetch_advisories.py  # Python script to automate fetching external API data
+│
+├── static/                     # Frontend interactivity and styling assets[cite: 9]
+│   ├── css/
+│   │   └── styles.css          # Tailwind CSS compiled file[cite: 9, 11]
+│   ├── js/
+│   │   └── map_leaflet.js      # Leaflet.js logic for the color-coded interactive risk map overlays[cite: 9, 12]
+│   └── img/                    # Icons and logo assets
+│
+└── templates/                  # HTML files representing your Figma UI[cite: 9, 11]
+    ├── base.html               # Main layout wrapper (navbar, footer, global styles)
+    ├── users/
+    │   ├── login.html          # Authentication form (Traveler & Admin)[cite: 11]
+    │   └── dashboard.html      # User saved reminders and Admin overview[cite: 13]
+    └── destinations/
+        ├── map.html            # Interactive Risk Map view[cite: 12]
+        ├── profile.html        # Destination threat matrix, safety tips, and alerts[cite: 12]
+        └── no_results.html     # Edge-case fallback UI for non-whitelisted destination searches
