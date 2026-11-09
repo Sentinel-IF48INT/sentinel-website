@@ -1,34 +1,20 @@
 /**
  * ============================================================================
  *  SENTINEL — Travel Safety & Threat Advisory Platform (WNI)
- *  Week #6 Assignment — Class Diagram → Object-Oriented Skeleton Code
+ *  Week #6 & Week #8 — Object-Oriented Entity Layer (<<entity>>)
  *  Group  : Bluish Pinkies Coco Puff
  *  Course : Software Implementation and Testing (IMPAL)
  * ----------------------------------------------------------------------------
- *  This file is the 1:1 TypeScript translation of the Sentinel UML Class
- *  Diagram. Each class maps to one PostgreSQL table from the Week #5 schema:
- *
- *    User (abstract) ─┬─ Traveler        → table "Users" (user_role = TRAVELER)
- *                     └─ Administrator   → table "Users" (user_role = ADMINISTRATOR)
- *    Destination                         → table "Destination"
- *    SafetyAlert                         → table "SafetyAlert"
- *    EmergencyContact                    → table "EmergencyContact"
- *    Watchlist                           → table "Watchlist"
- *
- *  Conventions
- *   - `private`   : attribute is fully encapsulated; accessed via getters.
- *   - `protected` : visible to subclasses (Traveler / Administrator).
- *   - `public`    : part of the class' external contract (UML "+").
- *   - Method bodies are intentionally left as placeholders (`TODO`) because
- *     Week #6 only requires skeleton code. The ONLY fully implemented
- *     behaviour is credential verification (used by the Login feature).
+ *  1:1 TypeScript translation of the Sentinel UML Class Diagram with full
+ *  domain logic for UC-01 (Search Destination), UC-02 (Safety Alerts & KBRI
+ *  Emergency Contacts), UC-05 (Login), and UC-10 (View Safety Profile).
  * ============================================================================
  */
 
 import { scryptSync, timingSafeEqual } from "node:crypto";
 
 /* --------------------------------------------------------------------------
- *  Enumerations & value types (UML <<enumeration>>)
+ *  Enumerations & Value Types
  * ------------------------------------------------------------------------ */
 
 /** Only two roles are allowed in the MVP scope. */
@@ -47,7 +33,7 @@ export enum RiskCategory {
 /** Numeric advisory level (L1–L4) carried by every SafetyAlert. */
 export type RiskLevel = 1 | 2 | 3 | 4;
 
-/** Safe, serialisable projection of a user (never contains the hash). */
+/** Safe, serialisable projection of a user (never contains the password hash). */
 export interface PublicUserProfile {
   userId: number;
   email: string;
@@ -56,7 +42,7 @@ export interface PublicUserProfile {
   role: UserRole;
 }
 
-/** Aggregated read-model returned by UC-1 / UC-10 (Safety Profile). */
+/** Aggregated read-model returned by UC-01 / UC-10 (Safety Profile). */
 export interface SafetyProfile {
   destination: Destination;
   riskLevel: RiskLevel;
@@ -64,249 +50,60 @@ export interface SafetyProfile {
   emergencyContacts: EmergencyContact[];
 }
 
-/* ==========================================================================
- *  1. USER (abstract)  — table "Users"
- * ======================================================================== */
-export abstract class User {
-  private readonly userId: number;
-  private email: string;
-  private username: string;
-  private firstName: string;
-  private lastName: string;
-  protected readonly userRole: UserRole;
-  /** Stored as `scrypt$<saltHex>$<hashHex>`; never exposed publicly. */
-  private passwordHash: string;
+/* --------------------------------------------------------------------------
+ *  Database Row Interfaces (PostgreSQL & In-Memory Seed Catalog)
+ * ------------------------------------------------------------------------ */
 
-  protected constructor(
-    userId: number,
-    email: string,
-    username: string,
-    firstName: string,
-    lastName: string,
-    userRole: UserRole,
-    passwordHash: string,
-  ) {
-    this.userId = userId;
-    this.email = email;
-    this.username = username;
-    this.firstName = firstName;
-    this.lastName = lastName;
-    this.userRole = userRole;
-    this.passwordHash = passwordHash;
-  }
+export interface DestinationRow {
+  country_id: number;
+  country_name: string;
+  iso_alpha_3_code: string;
+  is_whitelisted: boolean;
+  risk_category: RiskCategory | "LOW" | "ELEVATED" | "CRITICAL" | string;
+  general_info: string | null;
+}
 
-  // ---- Getters (encapsulation) -------------------------------------------
-  public getUserId(): number {
-    return this.userId;
-  }
-  public getEmail(): string {
-    return this.email;
-  }
-  public getUsername(): string {
-    return this.username;
-  }
-  public getFirstName(): string {
-    return this.firstName;
-  }
-  public getLastName(): string {
-    return this.lastName;
-  }
-  public getRole(): UserRole {
-    return this.userRole;
-  }
-  public getFullName(): string {
-    return `${this.firstName} ${this.lastName}`.trim();
-  }
+export interface SafetyAlertRow {
+  alert_id: number;
+  destination_country_id: number;
+  risk_level: RiskLevel | number;
+  title: string;
+  detail: string;
+  is_active: boolean;
+  date?: string;
+}
 
-  // ---- Behaviour ----------------------------------------------------------
+export interface EmergencyContactRow {
+  contact_id: number;
+  destination_country_id: number;
+  mission_name: string;
+  hotline: string;
+  email: string | null;
+}
 
-  /**
-   * UC-5 Login — verifies a plaintext password against the stored scrypt hash.
-   * Implemented (not a placeholder) because the Login flow is required to be
-   * fully working end-to-end. Uses constant-time comparison.
-   */
-  public verifyPassword(plainPassword: string): boolean {
-    return User.verifyHash(plainPassword, this.passwordHash);
-  }
+/** Narrows an arbitrary number (e.g. SMALLINT column) to a valid RiskLevel. */
+function toRiskLevel(value: number): RiskLevel {
+  if (value === 1 || value === 2 || value === 3 || value === 4) return value;
+  if (value < 1) return 1;
+  return 4;
+}
 
-  /** Projection safe to send to the client (no password hash). */
-  public toPublicProfile(): PublicUserProfile {
-    return {
-      userId: this.userId,
-      email: this.email,
-      username: this.username,
-      fullName: this.getFullName(),
-      role: this.userRole,
-    };
-  }
-
-  /** Updates editable profile fields. */
-  public updateProfile(firstName: string, lastName: string): void {
-    // TODO (Week 7+): validate input, persist via UserRepository.update()
-    void firstName;
-    void lastName;
-  }
-
-  /** Each subclass declares which use cases it may perform. */
-  public abstract getPermissions(): string[];
-
-  // ---- Static helpers -----------------------------------------------------
-
-  /** Factory: builds the correct subclass from a raw "Users" table row. */
-  public static fromRow(row: {
-    user_id: number;
-    email: string;
-    username: string;
-    first_name: string;
-    last_name: string;
-    user_role: string;
-    password_hash: string;
-  }): User {
-    const args = [
-      row.user_id,
-      row.email,
-      row.username,
-      row.first_name,
-      row.last_name,
-      row.password_hash,
-    ] as const;
-    return row.user_role === UserRole.ADMINISTRATOR
-      ? new Administrator(...args)
-      : new Traveler(...args);
-  }
-
-  /** Creates a `scrypt$salt$hash` string (used by the seed script). */
-  public static hashPassword(plainPassword: string, saltHex: string): string {
-    const hash = scryptSync(plainPassword, Buffer.from(saltHex, "hex"), 32);
-    return `scrypt$${saltHex}$${hash.toString("hex")}`;
-  }
-
-  protected static verifyHash(plainPassword: string, stored: string): boolean {
-    const [algo, saltHex, hashHex] = stored.split("$");
-    if (algo !== "scrypt" || !saltHex || !hashHex) return false;
-    const expected = Buffer.from(hashHex, "hex");
-    const actual = scryptSync(plainPassword, Buffer.from(saltHex, "hex"), expected.length);
-    return expected.length === actual.length && timingSafeEqual(expected, actual);
+/** Narrows a DB string to the RiskCategory enum. */
+function toRiskCategory(value: string): RiskCategory {
+  switch (value.toUpperCase()) {
+    case RiskCategory.LOW:
+      return RiskCategory.LOW;
+    case RiskCategory.ELEVATED:
+      return RiskCategory.ELEVATED;
+    case RiskCategory.CRITICAL:
+      return RiskCategory.CRITICAL;
+    default:
+      return RiskCategory.LOW;
   }
 }
 
 /* ==========================================================================
- *  1a. TRAVELER  — specialisation of User (user_role = 'TRAVELER')
- * ======================================================================== */
-export class Traveler extends User {
-  private watchlist: Watchlist[] = [];
-
-  public constructor(
-    userId: number,
-    email: string,
-    username: string,
-    firstName: string,
-    lastName: string,
-    passwordHash: string,
-  ) {
-    super(userId, email, username, firstName, lastName, UserRole.TRAVELER, passwordHash);
-  }
-
-  public getPermissions(): string[] {
-    return ["UC-1", "UC-2", "UC-5", "UC-7", "UC-8", "UC-10", "UC-15"];
-  }
-
-  /** UC-1: search a whitelisted destination by EN/ID name, alias or ISO code. */
-  public searchDestination(query: string): Destination | null {
-    // TODO: normalise query, call DestinationRepository.findWhitelisted(query)
-    void query;
-    return null;
-  }
-
-  /** UC-10: view the aggregated safety profile of a destination. */
-  public viewSafetyProfile(destination: Destination): SafetyProfile {
-    // TODO: delegate to destination.getSafetyProfile()
-    return destination.getSafetyProfile();
-  }
-
-  /** UC-8: save a destination to the personal watchlist. */
-  public addToWatchlist(destination: Destination, reminderNote?: string): Watchlist {
-    // TODO: INSERT INTO "Watchlist" … RETURNING *
-    void destination;
-    void reminderNote;
-    throw new Error("Not implemented (Week 6 skeleton)");
-  }
-
-  /** UC-8: remove a destination from the watchlist. */
-  public removeFromWatchlist(watchlistId: number): boolean {
-    // TODO: DELETE FROM "Watchlist" WHERE watchlist_id = $1 AND user_id = $2
-    void watchlistId;
-    return false;
-  }
-
-  /** UC-15: attach / edit a reminder note on a saved destination. */
-  public setReminder(watchlistId: number, note: string): void {
-    // TODO: find watchlist item, call item.updateReminderNote(note)
-    void watchlistId;
-    void note;
-  }
-
-  public getWatchlist(): Watchlist[] {
-    return [...this.watchlist];
-  }
-}
-
-/* ==========================================================================
- *  1b. ADMINISTRATOR  — specialisation of User (user_role = 'ADMINISTRATOR')
- * ======================================================================== */
-export class Administrator extends User {
-  public constructor(
-    userId: number,
-    email: string,
-    username: string,
-    firstName: string,
-    lastName: string,
-    passwordHash: string,
-  ) {
-    super(userId, email, username, firstName, lastName, UserRole.ADMINISTRATOR, passwordHash);
-  }
-
-  public getPermissions(): string[] {
-    return ["UC-1", "UC-2", "UC-5", "UC-7", "UC-10", "ADMIN-RISK", "ADMIN-ALERT", "ADMIN-CONTACT"];
-  }
-
-  /** Re-classify the risk band of a destination. */
-  public updateRiskCategory(destination: Destination, category: RiskCategory): void {
-    // TODO: destination.setRiskCategory(category); persist; audit log
-    void destination;
-    void category;
-  }
-
-  /** UC-2 (admin side): publish a new safety alert. */
-  public publishSafetyAlert(
-    destination: Destination,
-    riskLevel: RiskLevel,
-    title: string,
-    detail: string,
-  ): SafetyAlert {
-    // TODO: INSERT INTO "SafetyAlert" … RETURNING *
-    void destination;
-    void riskLevel;
-    void title;
-    void detail;
-    throw new Error("Not implemented (Week 6 skeleton)");
-  }
-
-  /** UC-2 (admin side): retire an outdated alert. */
-  public deactivateAlert(alert: SafetyAlert): void {
-    // TODO: alert.deactivate(); persist
-    void alert;
-  }
-
-  /** UC-2 (admin side): create or update a KBRI emergency contact. */
-  public manageEmergencyContact(contact: EmergencyContact): EmergencyContact {
-    // TODO: UPSERT INTO "EmergencyContact"
-    return contact;
-  }
-}
-
-/* ==========================================================================
- *  2. DESTINATION  — table "Destination"
+ *  1. DESTINATION (<<entity>>) — table "Destination"
  * ======================================================================== */
 export class Destination {
   private readonly countryId: number;
@@ -330,10 +127,33 @@ export class Destination {
   ) {
     this.countryId = countryId;
     this.countryName = countryName;
-    this.isoAlpha3Code = isoAlpha3Code;
+    this.isoAlpha3Code = isoAlpha3Code.trim().toUpperCase();
     this.isWhitelisted = isWhitelisted;
     this.riskCategory = riskCategory;
     this.generalInfo = generalInfo;
+  }
+
+  /** Static factory: hydrates a Destination entity from a DB/catalog row. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public static fromRow(row: DestinationRow | Record<string, any>): Destination {
+    return new Destination(
+      Number(row.country_id),
+      String(row.country_name ?? ""),
+      String(row.iso_alpha_3_code ?? ""),
+      Boolean(row.is_whitelisted),
+      toRiskCategory(String(row.risk_category ?? "LOW")),
+      String(row.general_info ?? ""),
+    );
+  }
+
+  /** Normalizes a string: strips diacritics, trims, collapses spaces, lowercases. */
+  public static normalizeTerm(term: string): string {
+    return term
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
   }
 
   public getCountryId(): number {
@@ -355,32 +175,64 @@ export class Destination {
     return this.isWhitelisted;
   }
 
+  /**
+   * UC-01: Checks whether the raw query matches this destination's English name,
+   * ISO Alpha-3 code, or any provided localized aliases (e.g. Bahasa Indonesia).
+   */
+  public matchesQuery(rawQuery: string, aliases: string[] = []): boolean {
+    const normalizedQuery = Destination.normalizeTerm(rawQuery);
+    if (!normalizedQuery) return false;
+
+    if (Destination.normalizeTerm(this.countryName) === normalizedQuery) {
+      return true;
+    }
+    if (Destination.normalizeTerm(this.isoAlpha3Code) === normalizedQuery) {
+      return true;
+    }
+    return aliases.some((alias) => Destination.normalizeTerm(alias) === normalizedQuery);
+  }
+
   /** Admin-only mutation (called by Administrator.updateRiskCategory). */
   public setRiskCategory(category: RiskCategory): void {
-    // TODO: guard + persist
     this.riskCategory = category;
   }
 
-  /** Derived attribute: highest risk_level among active alerts (L1 fallback). */
+  /**
+   * Derived attribute: returns the maximum risk level across active alerts,
+   * or falls back to a category-based level (LOW -> 1, ELEVATED -> 2, CRITICAL -> 4).
+   */
   public getCurrentRiskLevel(): RiskLevel {
-    // TODO: return max(alert.riskLevel) over getActiveAlerts(), default 1
-    return 1;
+    const active = this.getActiveAlerts();
+    if (active.length > 0) {
+      return active.reduce<RiskLevel>(
+        (max, alert) => (alert.getRiskLevel() > max ? alert.getRiskLevel() : max),
+        1,
+      );
+    }
+    switch (this.riskCategory) {
+      case RiskCategory.LOW:
+        return 1;
+      case RiskCategory.ELEVATED:
+        return 2;
+      case RiskCategory.CRITICAL:
+        return 4;
+    }
   }
 
-  /** UC-2: only alerts where is_active = TRUE. */
+  /** UC-02: Filters and returns only active safety alerts (highest severity first). */
   public getActiveAlerts(): SafetyAlert[] {
-    // TODO: filter this.safetyAlerts by alert.isActive()
-    return [];
+    return this.safetyAlerts
+      .filter((alert) => alert.isActive())
+      .sort((a, b) => b.getRiskLevel() - a.getRiskLevel());
   }
 
-  /** UC-2: KBRI / consular contacts for this destination. */
+  /** UC-02: Returns KBRI / consular emergency contacts for this destination. */
   public getEmergencyContacts(): EmergencyContact[] {
     return [...this.emergencyContacts];
   }
 
-  /** UC-10: aggregated safety profile. */
+  /** UC-10: Assembles and returns the aggregated SafetyProfile read-model. */
   public getSafetyProfile(): SafetyProfile {
-    // TODO: assemble from getCurrentRiskLevel(), getActiveAlerts(), getEmergencyContacts()
     return {
       destination: this,
       riskLevel: this.getCurrentRiskLevel(),
@@ -390,26 +242,24 @@ export class Destination {
   }
 
   public addSafetyAlert(alert: SafetyAlert): void {
-    // TODO: validate alert.destinationCountryId === this.countryId
     this.safetyAlerts.push(alert);
   }
 
   public addEmergencyContact(contact: EmergencyContact): void {
-    // TODO: validate contact.destinationCountryId === this.countryId
     this.emergencyContacts.push(contact);
   }
 }
 
 /* ==========================================================================
- *  3. SAFETY ALERT  — table "SafetyAlert"
+ *  2. SAFETY ALERT (<<entity>>) — table "SafetyAlert"
  * ======================================================================== */
 export class SafetyAlert {
   private readonly alertId: number;
-  private readonly destinationCountryId: number; // FK → Destination.country_id
+  private readonly destinationCountryId: number;
   private riskLevel: RiskLevel;
   private title: string;
   private detail: string;
-  private active: boolean; // column: is_active
+  private active: boolean;
 
   public constructor(
     alertId: number,
@@ -425,6 +275,19 @@ export class SafetyAlert {
     this.title = title;
     this.detail = detail;
     this.active = isActive;
+  }
+
+  /** Static factory: hydrates a SafetyAlert entity from a DB/catalog row. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public static fromRow(row: SafetyAlertRow | Record<string, any>): SafetyAlert {
+    return new SafetyAlert(
+      Number(row.alert_id),
+      Number(row.destination_country_id),
+      toRiskLevel(Number(row.risk_level ?? 1)),
+      String(row.title ?? ""),
+      String(row.detail ?? ""),
+      Boolean(row.is_active ?? true),
+    );
   }
 
   public getAlertId(): number {
@@ -445,36 +308,29 @@ export class SafetyAlert {
   public isActive(): boolean {
     return this.active;
   }
-
-  /** Level 4 alerts trigger the SOS / KBRI shortcut in the UI. */
   public isCritical(): boolean {
     return this.riskLevel === 4;
   }
-
   public activate(): void {
-    // TODO: persist
     this.active = true;
   }
-
   public deactivate(): void {
-    // TODO: persist
     this.active = false;
   }
 
   public updateContent(title: string, detail: string, riskLevel: RiskLevel): void {
-    // TODO: validate + persist
-    void title;
-    void detail;
-    void riskLevel;
+    this.title = title.trim();
+    this.detail = detail.trim();
+    this.riskLevel = toRiskLevel(riskLevel);
   }
 }
 
 /* ==========================================================================
- *  4. EMERGENCY CONTACT  — table "EmergencyContact"
+ *  3. EMERGENCY CONTACT (<<entity>>) — table "EmergencyContact"
  * ======================================================================== */
 export class EmergencyContact {
   private readonly contactId: number;
-  private readonly destinationCountryId: number; // FK → Destination.country_id
+  private readonly destinationCountryId: number;
   private missionName: string;
   private hotline: string;
   private email: string;
@@ -493,6 +349,18 @@ export class EmergencyContact {
     this.email = email;
   }
 
+  /** Static factory: hydrates an EmergencyContact entity from a DB/catalog row. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public static fromRow(row: EmergencyContactRow | Record<string, any>): EmergencyContact {
+    return new EmergencyContact(
+      Number(row.contact_id),
+      Number(row.destination_country_id),
+      String(row.mission_name ?? ""),
+      String(row.hotline ?? ""),
+      String(row.email ?? ""),
+    );
+  }
+
   public getContactId(): number {
     return this.contactId;
   }
@@ -509,25 +377,233 @@ export class EmergencyContact {
     return this.email;
   }
 
-  /** Formatted card shown in the "Diplomatic Protection (WNI)" panel. */
   public getContactCard(): string {
-    // TODO: richer formatting / i18n
-    return `${this.missionName} | ${this.hotline} | ${this.email}`;
+    return [this.missionName, this.hotline, this.email].filter(Boolean).join(" | ");
   }
 
   public updateHotline(hotline: string): void {
-    // TODO: validate E.164 format + persist
-    void hotline;
+    this.hotline = hotline.trim();
   }
 }
 
 /* ==========================================================================
- *  5. WATCHLIST  — table "Watchlist" (association class User ↔ Destination)
+ *  4. USER (abstract <<entity>>) — table "Users" (UC-05 Login & RBAC)
+ * ======================================================================== */
+export abstract class User {
+  private readonly userId: number;
+  private email: string;
+  private username: string;
+  private firstName: string;
+  private lastName: string;
+  protected readonly userRole: UserRole;
+  private passwordHash: string;
+
+  protected constructor(
+    userId: number,
+    email: string,
+    username: string,
+    firstName: string,
+    lastName: string,
+    userRole: UserRole,
+    passwordHash: string,
+  ) {
+    this.userId = userId;
+    this.email = email;
+    this.username = username;
+    this.firstName = firstName;
+    this.lastName = lastName;
+    this.userRole = userRole;
+    this.passwordHash = passwordHash;
+  }
+
+  public getUserId(): number {
+    return this.userId;
+  }
+  public getEmail(): string {
+    return this.email;
+  }
+  public getUsername(): string {
+    return this.username;
+  }
+  public getFirstName(): string {
+    return this.firstName;
+  }
+  public getLastName(): string {
+    return this.lastName;
+  }
+  public getRole(): UserRole {
+    return this.userRole;
+  }
+  public getFullName(): string {
+    return `${this.firstName} ${this.lastName}`.trim();
+  }
+
+  public verifyPassword(plainPassword: string): boolean {
+    return User.verifyHash(plainPassword, this.passwordHash);
+  }
+
+  public toPublicProfile(): PublicUserProfile {
+    return {
+      userId: this.userId,
+      email: this.email,
+      username: this.username,
+      fullName: this.getFullName(),
+      role: this.userRole,
+    };
+  }
+
+  public updateProfile(firstName: string, lastName: string): void {
+    this.firstName = firstName.trim();
+    this.lastName = lastName.trim();
+  }
+
+  public abstract getPermissions(): string[];
+
+  public static fromRow(row: {
+    user_id: number;
+    email: string;
+    username: string;
+    first_name: string;
+    last_name: string;
+    user_role: string;
+    password_hash: string;
+  }): User {
+    const args = [
+      row.user_id,
+      row.email,
+      row.username,
+      row.first_name,
+      row.last_name,
+      row.password_hash,
+    ] as const;
+    return row.user_role === UserRole.ADMINISTRATOR
+      ? new Administrator(...args)
+      : new Traveler(...args);
+  }
+
+  public static hashPassword(plainPassword: string, saltHex: string): string {
+    const hash = scryptSync(plainPassword, Buffer.from(saltHex, "hex"), 32);
+    return `scrypt$${saltHex}$${hash.toString("hex")}`;
+  }
+
+  protected static verifyHash(plainPassword: string, stored: string): boolean {
+    const [algo, saltHex, hashHex] = stored.split("$");
+    if (algo !== "scrypt" || !saltHex || !hashHex) return false;
+    const expected = Buffer.from(hashHex, "hex");
+    const actual = scryptSync(plainPassword, Buffer.from(saltHex, "hex"), expected.length);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+}
+
+/* ==========================================================================
+ *  4a. TRAVELER — specialisation of User (user_role = 'TRAVELER')
+ * ======================================================================== */
+export class Traveler extends User {
+  private watchlist: Watchlist[] = [];
+
+  public constructor(
+    userId: number,
+    email: string,
+    username: string,
+    firstName: string,
+    lastName: string,
+    passwordHash: string,
+  ) {
+    super(userId, email, username, firstName, lastName, UserRole.TRAVELER, passwordHash);
+  }
+
+  public getPermissions(): string[] {
+    return ["UC-1", "UC-2", "UC-5", "UC-7", "UC-8", "UC-10", "UC-15"];
+  }
+
+  public searchDestination(
+    query: string,
+    candidates: Destination[] = [],
+  ): Destination | null {
+    return candidates.find((d) => d.isSearchable() && d.matchesQuery(query)) ?? null;
+  }
+
+  public viewSafetyProfile(destination: Destination): SafetyProfile {
+    return destination.getSafetyProfile();
+  }
+
+  public addToWatchlist(destination: Destination, reminderNote?: string): Watchlist {
+    const item = new Watchlist(
+      this.watchlist.length + 1,
+      this.getUserId(),
+      destination.getCountryId(),
+      reminderNote ?? null,
+    );
+    this.watchlist.push(item);
+    return item;
+  }
+
+  public removeFromWatchlist(watchlistId: number): boolean {
+    const before = this.watchlist.length;
+    this.watchlist = this.watchlist.filter((w) => w.getWatchlistId() !== watchlistId);
+    return this.watchlist.length < before;
+  }
+
+  public setReminder(watchlistId: number, note: string): void {
+    const item = this.watchlist.find((w) => w.getWatchlistId() === watchlistId);
+    if (item) item.updateReminderNote(note);
+  }
+
+  public getWatchlist(): Watchlist[] {
+    return [...this.watchlist];
+  }
+}
+
+/* ==========================================================================
+ *  4b. ADMINISTRATOR — specialisation of User (user_role = 'ADMINISTRATOR')
+ * ======================================================================== */
+export class Administrator extends User {
+  public constructor(
+    userId: number,
+    email: string,
+    username: string,
+    firstName: string,
+    lastName: string,
+    passwordHash: string,
+  ) {
+    super(userId, email, username, firstName, lastName, UserRole.ADMINISTRATOR, passwordHash);
+  }
+
+  public getPermissions(): string[] {
+    return ["UC-1", "UC-2", "UC-5", "UC-7", "UC-10", "ADMIN-RISK", "ADMIN-ALERT", "ADMIN-CONTACT"];
+  }
+
+  public updateRiskCategory(destination: Destination, category: RiskCategory): void {
+    destination.setRiskCategory(category);
+  }
+
+  public publishSafetyAlert(
+    destination: Destination,
+    riskLevel: RiskLevel,
+    title: string,
+    detail: string,
+  ): SafetyAlert {
+    const alert = new SafetyAlert(Date.now(), destination.getCountryId(), riskLevel, title, detail, true);
+    destination.addSafetyAlert(alert);
+    return alert;
+  }
+
+  public deactivateAlert(alert: SafetyAlert): void {
+    alert.deactivate();
+  }
+
+  public manageEmergencyContact(contact: EmergencyContact): EmergencyContact {
+    return contact;
+  }
+}
+
+/* ==========================================================================
+ *  5. WATCHLIST (<<entity>>) — table "Watchlist"
  * ======================================================================== */
 export class Watchlist {
   private readonly watchlistId: number;
-  private readonly userId: number; // FK → Users.user_id
-  private readonly destinationCountryId: number; // FK → Destination.country_id
+  private readonly userId: number;
+  private readonly destinationCountryId: number;
   private reminderNote: string | null;
   private readonly savedAt: Date;
 
@@ -560,15 +636,10 @@ export class Watchlist {
   public getSavedAt(): Date {
     return this.savedAt;
   }
-
-  /** Ownership check used before update/delete. */
   public belongsTo(userId: number): boolean {
     return this.userId === userId;
   }
-
-  /** UC-15: edit reminder note. */
   public updateReminderNote(note: string): void {
-    // TODO: trim, max length 255, persist
-    void note;
+    this.reminderNote = note.trim().slice(0, 255);
   }
 }

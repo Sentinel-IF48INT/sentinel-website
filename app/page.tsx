@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Map,
   MapMarker,
@@ -27,6 +27,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import LoginModal, { type SessionUser } from "@/components/auth/login-modal";
+import type { DestinationProfileDTO } from "@/lib/destination-service";
 
 type RiskCategory = "LOW" | "ELEVATED" | "CRITICAL";
 
@@ -556,6 +557,9 @@ export default function SentinelMapPage() {
   const [selectedId, setSelectedId] = useState<string>("aus");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [invalidQuery, setInvalidQuery] = useState<string | null>(null);
+  const [searching, setSearching] = useState<boolean>(false);
+  const [searchSource, setSearchSource] = useState<string | null>(null);
+  const searchRequestId = useRef<number>(0);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [loginOpen, setLoginOpen] = useState<boolean>(false);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
@@ -586,24 +590,108 @@ export default function SentinelMapPage() {
     }));
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
+  /** UC-01 / UC-10: <<boundary>> → GET /api/destinations?q=… (<<controller>>). */
+  const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const norm = searchQuery.trim().replace(/\s+/g, " ").toLowerCase();
-    if (!norm || norm.length > 80) {
+    const raw = searchQuery.trim();
+
+    // 1. Validate input length locally (Alternative Flow 3a)
+    if (!raw || raw.length > 80) {
+      setSearchSource(null);
       setInvalidQuery(searchQuery || "[EMPTY INPUT]");
       return;
     }
-    const found = countries.find(
-      (c) =>
-        c.nameEn.toLowerCase() === norm ||
-        c.nameId.toLowerCase() === norm ||
-        c.iso.toLowerCase() === norm ||
-        c.aliases.includes(norm)
-    );
-    if (found) {
-      handleSelectCountry(found);
-    } else {
-      setInvalidQuery(searchQuery);
+
+    // 2. Set searching state
+    const requestId = ++searchRequestId.current;
+    setSearching(true);
+
+    try {
+      // 3. Fetch from Controller API route
+      const res = await fetch(`/api/destinations?q=${encodeURIComponent(raw)}`);
+
+      // 4. If !res.ok (404 / 400), trigger the Alternative Flow UI
+      if (!res.ok) {
+        if (requestId === searchRequestId.current) {
+          setSearchSource(null);
+          setInvalidQuery(searchQuery);
+        }
+        return;
+      }
+
+      const data = await res.json();
+      if (requestId !== searchRequestId.current) return;
+
+      const profile = data.profile as DestinationProfileDTO | null;
+      if (!profile) {
+        setSearchSource(null);
+        setInvalidQuery(searchQuery);
+        return;
+      }
+
+      // 5. If 200 OK, merge profile and update selected country via handleSelectCountry(matched)
+      const slug =
+        profile.slug ?? profile.destination.isoAlpha3Code.toLowerCase();
+      const baseCountry =
+        countries.find(
+          (c) =>
+            c.id === slug ||
+            c.nameEn.toLowerCase() === profile.countryName.toLowerCase() ||
+            c.iso.toLowerCase() === profile.iso2.toLowerCase()
+        ) ?? countries[0];
+
+      const matched: Destination = {
+        ...baseCountry,
+        id: slug,
+        iso: profile.iso2 ?? baseCountry.iso,
+        nameEn: profile.countryName ?? baseCountry.nameEn,
+        nameId: profile.nameId ?? baseCountry.nameId,
+        region: profile.region ?? baseCountry.region,
+        capital: profile.capital ?? baseCountry.capital,
+        riskLevel: profile.riskLevel,
+        riskCategory: profile.riskCategory,
+        lng: profile.lng ?? baseCountry.lng,
+        lat: profile.lat ?? baseCountry.lat,
+        imageUrl: profile.imageUrl ?? baseCountry.imageUrl,
+        lastUpdated: profile.lastUpdated ?? baseCountry.lastUpdated,
+        summary: profile.summary ?? profile.generalInfo ?? baseCountry.summary,
+        alerts: profile.activeAlerts.map((a) => ({
+          id: a.id ?? `${slug}-${a.alertId}`,
+          severity: a.severity,
+          title: a.title,
+          date: a.date,
+          detail: a.detail,
+        })),
+        embassy: profile.embassy ?? baseCountry.embassy,
+      };
+
+      setCountries((prev) =>
+        prev.map((c) => (c.id === matched.id ? matched : c))
+      );
+      setSearchSource((data.dataSource as string) ?? "demo-seed");
+      handleSelectCountry(matched);
+    } catch {
+      if (requestId !== searchRequestId.current) return;
+      // 6. Graceful local fallback when API is offline
+      const norm = raw.replace(/\s+/g, " ").toLowerCase();
+      const matched = countries.find(
+        (c) =>
+          c.nameEn.toLowerCase() === norm ||
+          c.nameId.toLowerCase() === norm ||
+          c.iso.toLowerCase() === norm ||
+          c.aliases.includes(norm)
+      );
+      if (matched) {
+        setSearchSource("local-fallback");
+        handleSelectCountry(matched);
+      } else {
+        setSearchSource(null);
+        setInvalidQuery(searchQuery);
+      }
+    } finally {
+      if (requestId === searchRequestId.current) {
+        setSearching(false);
+      }
     }
   };
 
@@ -805,15 +893,17 @@ export default function SentinelMapPage() {
                 />
                 <button
                   type="submit"
-                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm px-4 py-2 rounded-lg inline-flex items-center gap-1.5"
+                  disabled={searching}
+                  className="bg-teal-600 hover:bg-teal-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm px-4 py-2 rounded-lg inline-flex items-center gap-1.5"
                 >
-                  <Search className="size-4" /> Search
+                  <Search className="size-4" /> {searching ? "Searching…" : "Search"}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setSearchQuery("");
                     setInvalidQuery(null);
+                    setSearchSource(null);
                     handleSelectCountry(countries[0]);
                   }}
                   className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-sm px-3 py-2 rounded-lg inline-flex items-center gap-1"
@@ -837,6 +927,17 @@ export default function SentinelMapPage() {
                   </button>
                 ))}
               </div>
+              <p id="search-status" role="status" aria-live="polite" className="text-[11px] text-gray-500 min-h-4">
+                {searching
+                  ? "Searching whitelisted destinations…"
+                  : searchSource === "postgresql"
+                    ? "Safety profile loaded from PostgreSQL via GET /api/destinations."
+                    : searchSource === "demo-seed"
+                      ? "Safety profile loaded from the demo seed (no DATABASE_URL) via GET /api/destinations."
+                      : searchSource === "local-fallback"
+                        ? "API unreachable — showing bundled local whitelist data."
+                        : ""}
+              </p>
             </form>
           </section>
 
