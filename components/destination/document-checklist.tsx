@@ -5,16 +5,27 @@ import {
   Check,
   ClipboardCheck,
   FileCheck2,
+  FileDown,
   RotateCcw,
   ShieldAlert,
 } from "lucide-react";
 import type { RequiredDocumentItem } from "@/lib/destination-catalog";
 
+interface EmbassySummary {
+  missionName: string;
+  address: string;
+  hotline: string;
+  localEmergency: string;
+  email: string;
+}
+
 interface DocumentChecklistProps {
   countryIsoOrId: string;
   countryName: string;
+  countryNameId?: string;
   riskLevel: 1 | 2 | 3 | 4;
   documents: RequiredDocumentItem[];
+  embassy?: EmbassySummary;
 }
 
 interface ChecklistState {
@@ -55,9 +66,12 @@ function parseStoredIds(
 export function DocumentChecklist({
   countryIsoOrId,
   countryName,
+  countryNameId,
   riskLevel,
   documents,
+  embassy,
 }: DocumentChecklistProps) {
+  const [pdfNotice, setPdfNotice] = useState<string>("");
   const storageKey = `sentinel_checklist_${countryIsoOrId.toLowerCase()}`;
   const validDocIds = useMemo(
     () => new Set(documents.map((doc) => doc.id)),
@@ -149,8 +163,40 @@ export function DocumentChecklist({
     });
   };
 
+  const handleSaveAsPdf = () => {
+    if (typeof window === "undefined") return;
+    const prevTitle = document.title;
+    const safeIso = (countryIsoOrId || countryName)
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "");
+    document.title = `SENTINEL-WNI-Checklist-${safeIso}`;
+    document.body.classList.add("printing-checklist");
+    setPdfNotice(`Preparing PDF checklist for ${countryName}.`);
+
+    const cleanup = () => {
+      document.body.classList.remove("printing-checklist");
+      document.title = prevTitle;
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+
+    window.print();
+    // Fallback cleanup in case afterprint does not fire in some environments
+    window.setTimeout(cleanup, 1500);
+  };
+
+  const riskSummaryLabel =
+    riskLevel === 1
+      ? "● Level 1 — Low Risk (Exercise Normal Precautions)"
+      : riskLevel === 2
+        ? "▲ Level 2 — Elevated Risk (Exercise Increased Caution)"
+        : riskLevel === 3
+          ? "▲ Level 3 — Elevated Risk (Reconsider Travel)"
+          : "◆ Level 4 — Critical Risk (Do Not Travel)";
+
   return (
     <div id="checklist-section" className="sentinel-glass rounded-3xl p-6 sm:p-7">
+      <div className="print:hidden">
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">
@@ -195,16 +241,30 @@ export function DocumentChecklist({
           </span>
 
           <button
+            id="checklist-save-pdf-btn"
+            type="button"
+            onClick={handleSaveAsPdf}
+            aria-label={`Save ${countryName} required documents checklist as PDF`}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[#021B43] px-3 py-1 text-xs font-semibold text-white shadow-xs transition hover:bg-[#032863] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00968A] focus-visible:ring-offset-2"
+          >
+            <FileDown className="h-3.5 w-3.5" aria-hidden="true" />
+            Save as PDF
+          </button>
+
+          <button
             type="button"
             onClick={handleReset}
             disabled={readyCount === 0}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00968A] disabled:cursor-not-allowed disabled:opacity-45"
           >
-            <RotateCcw className="h-3.5 w-3.5" />
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
             Reset
           </button>
         </div>
       </div>
+      <span className="sr-only" role="status" aria-live="polite">
+        {pdfNotice}
+      </span>
 
       {/* Animated Readiness Progress Bar */}
       <div className="mt-4">
@@ -319,6 +379,128 @@ export function DocumentChecklist({
           })}
         </div>
       )}
+      </div>
+
+      {/* Dedicated A4 Print / Save-as-PDF Dossier */}
+      <article
+        aria-label={`Printable WNI Entry Document Checklist for ${countryName}`}
+        className="hidden print:block text-slate-900 space-y-5"
+      >
+        <header className="border-b-2 border-[#021B43] pb-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#00968A]">
+              SENTINEL • Geopolitical Travel Safety Advisory (WNI)
+            </p>
+            <h2 className="text-2xl font-bold text-[#021B43] mt-1">
+              Pre-Departure Entry Document Checklist
+            </h2>
+            <p className="text-sm text-slate-700 mt-0.5">
+              Destination:{" "}
+              <strong>
+                {countryName}
+                {countryNameId && countryNameId !== countryName
+                  ? ` (${countryNameId})`
+                  : ""}
+              </strong>{" "}
+              • Code: <strong>{countryIsoOrId.toUpperCase()}</strong>
+            </p>
+          </div>
+          <div className="text-right text-xs text-slate-600 space-y-1">
+            <p className="font-semibold text-[#021B43]">
+              Origin: Indonesian Citizen (WNI)
+            </p>
+            <p>
+              Readiness:{" "}
+              <strong>
+                {readyCount} / {totalCount} ({percentage}%)
+              </strong>
+            </p>
+            <p>Generated: {new Date().toISOString().slice(0, 10)}</p>
+          </div>
+        </header>
+
+        <section className="rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-xs space-y-1">
+          <p className="font-bold text-[#021B43]">
+            Travel Advisory Classification: {riskSummaryLabel}
+          </p>
+          {riskLevel === 4 && (
+            <p className="font-semibold text-rose-700">
+              CRITICAL PROTOCOL: Non-essential WNI travel is advised against.
+              Mandatory Peduli WNI / KBRI Lapor Diri registration applies.
+            </p>
+          )}
+        </section>
+
+        <section aria-label="Required documents list" className="space-y-2.5">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-[#021B43]">
+            Required Documents ({totalCount})
+          </h3>
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-slate-300 bg-slate-100 text-left text-[#021B43]">
+                <th className="py-2 px-2.5 w-20">Status</th>
+                <th className="py-2 px-2.5">Document &amp; Guidance</th>
+                <th className="py-2 px-2.5 w-32">Category</th>
+                <th className="py-2 px-2.5 w-24">Requirement</th>
+              </tr>
+            </thead>
+            <tbody>
+              {documents.map((doc) => {
+                const isChecked = checkedSet.has(doc.id);
+                return (
+                  <tr
+                    key={doc.id}
+                    className="border-b border-slate-200 break-inside-avoid align-top"
+                  >
+                    <td className="py-2.5 px-2.5 font-semibold">
+                      {isChecked ? "[✓] Ready" : "[ ] Pending"}
+                    </td>
+                    <td className="py-2.5 px-2.5">
+                      <p className="font-bold text-slate-900">{doc.label}</p>
+                      {doc.note && (
+                        <p className="text-slate-600 mt-0.5 leading-relaxed">
+                          {doc.note}
+                        </p>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-2.5 text-slate-700">
+                      {doc.category}
+                    </td>
+                    <td className="py-2.5 px-2.5 font-semibold text-slate-800">
+                      {doc.mandatory ? "Mandatory" : "Advisory"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+
+        {embassy && (
+          <section className="rounded-lg border border-slate-300 p-4 text-xs space-y-1 break-inside-avoid">
+            <h3 className="font-bold uppercase tracking-wider text-[#021B43]">
+              Accredited Indonesian Diplomatic Mission (KBRI)
+            </h3>
+            <p className="font-semibold text-slate-900">{embassy.missionName}</p>
+            <p className="text-slate-700">{embassy.address}</p>
+            <p className="text-slate-800">
+              <strong>Hotline:</strong> {embassy.hotline} •{" "}
+              <strong>Local Emergency:</strong> {embassy.localEmergency}
+            </p>
+            <p className="text-slate-700">
+              <strong>Email:</strong> {embassy.email}
+            </p>
+          </section>
+        )}
+
+        <footer className="border-t border-slate-300 pt-3 text-[10px] text-slate-500 flex justify-between gap-4">
+          <span>
+            Verify final visa &amp; entry rules with Kemlu RI (peduliwni.kemlu.go.id)
+            and the destination embassy before departure.
+          </span>
+          <span>SENTINEL IMPAL MVP • [DEMO] Dataset</span>
+        </footer>
+      </article>
     </div>
   );
 }

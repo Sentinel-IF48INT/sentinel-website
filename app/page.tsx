@@ -1008,7 +1008,7 @@ export default function SentinelMapPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-7 space-y-6">
         {/* Administrator Override Bar */}
         {role === "admin" && (
-          <section className="rounded-2xl bg-slate-900 text-white p-5 shadow-sm ring-1 ring-slate-800 border-l-4 border-l-teal-400 flex flex-wrap items-center justify-between gap-4">
+          <section className="sentinel-no-print rounded-2xl bg-slate-900 text-white p-5 shadow-sm ring-1 ring-slate-800 border-l-4 border-l-teal-400 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-2.5 text-sm font-semibold">
               <RefreshCw className="size-4 text-teal-400" />
               <span>
@@ -1068,7 +1068,7 @@ export default function SentinelMapPage() {
         )}
 
         {/* Search & Watchlist Bento Grid */}
-        <div id="search-section" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div id="search-section" className="sentinel-no-print grid grid-cols-1 lg:grid-cols-3 gap-6">
           <section className="lg:col-span-2 sentinel-glass rounded-3xl p-6">
             <form onSubmit={handleSearchSubmit} className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1320,7 +1320,7 @@ export default function SentinelMapPage() {
         </div>
 
         {/* UC-7: Interactive Regional Risk Map */}
-        <section id="map-section" className="sentinel-glass rounded-3xl p-6 space-y-4">
+        <section id="map-section" className="sentinel-no-print sentinel-glass rounded-3xl p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 flex items-center gap-2">
@@ -1456,7 +1456,7 @@ export default function SentinelMapPage() {
           <section className="space-y-6">
             {/* Dynamic Risk Banner */}
             <div
-              className={`rounded-3xl p-6 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5 ${activeTheme.bannerBg}`}
+              className={`sentinel-no-print rounded-3xl p-6 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5 ${activeTheme.bannerBg}`}
             >
               <div className="flex items-start gap-4">
                 <div
@@ -1521,7 +1521,7 @@ export default function SentinelMapPage() {
             </div>
 
             {/* Alerts & KBRI Contacts Grid */}
-            <div id="advisories-section" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div id="advisories-section" className="sentinel-no-print grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Active Safety Bulletins */}
               <div className="lg:col-span-2 sentinel-glass rounded-3xl p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
@@ -1598,7 +1598,9 @@ export default function SentinelMapPage() {
             <DocumentChecklist
               countryIsoOrId={activeCountry.id}
               countryName={activeCountry.nameEn}
+              countryNameId={activeCountry.nameId}
               riskLevel={activeCountry.riskLevel}
+              embassy={activeCountry.embassy}
               documents={getRequiredDocumentsForCountry(
                 activeCountry.id || activeCountry.iso || activeCountry.nameEn,
               )}
