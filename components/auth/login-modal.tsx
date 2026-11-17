@@ -43,6 +43,8 @@ interface RegisteredAccountSummary {
   fullName: string;
   username: string;
   email: string;
+  user?: SessionUser;
+  dataSource?: string;
 }
 
 const DEMO_ACCOUNTS = [
@@ -270,8 +272,9 @@ export default function LoginModal({
     }));
   };
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
 
     const validation = validateRegistrationInput(regInput);
     setRegTouched({
@@ -302,21 +305,55 @@ export default function LoginModal({
       return;
     }
 
-    setRegisteredAccount(validation.sanitized);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: validation.sanitized.fullName,
+          username: validation.sanitized.username,
+          email: validation.sanitized.email,
+          password: regInput.password,
+          confirmPassword: regInput.confirmPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setRegErrors((prev) => ({
+          ...prev,
+          email: data.error ?? "Registration failed.",
+        }));
+        return;
+      }
+
+      setRegisteredAccount({
+        ...validation.sanitized,
+        user: data.user as SessionUser,
+        dataSource: (data.dataSource as string) ?? "demo-seed",
+      });
+    } catch {
+      setRegErrors((prev) => ({
+        ...prev,
+        email: "Network error. Please check your connection.",
+      }));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleActivateRegisteredSession = () => {
     if (!registeredAccount) return;
 
     onSuccess(
-      {
+      registeredAccount.user ?? {
         userId: Date.now(),
         email: registeredAccount.email,
         username: registeredAccount.username,
         fullName: registeredAccount.fullName,
         role: "TRAVELER",
       },
-      "demo-seed",
+      registeredAccount.dataSource ?? "demo-seed",
     );
     setRegInput(INITIAL_REGISTRATION);
     setRegTouched({});

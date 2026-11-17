@@ -135,7 +135,9 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   const internalUpdateRef = useRef(false);
   const resolvedTheme = useResolvedTheme(themeProp);
   const onViewportChangeRef = useRef(onViewportChange);
-  onViewportChangeRef.current = onViewportChange;
+  useEffect(() => {
+    onViewportChangeRef.current = onViewportChange;
+  }, [onViewportChange]);
 
   const mapStyles = useMemo(
     () => ({ dark: styles?.dark ?? defaultStyles.dark, light: styles?.light ?? defaultStyles.light }),
@@ -191,7 +193,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   useEffect(() => {
     if (!mapInstance) return;
     const nextStyle = resolvedTheme === "dark" ? mapStyles.dark : mapStyles.light;
-    setIsStyleLoaded(false);
+    queueMicrotask(() => setIsStyleLoaded(false));
     mapInstance.setStyle(nextStyle);
   }, [resolvedTheme, mapStyles, mapInstance]);
 
@@ -259,37 +261,52 @@ function MapMarker({
 }: MapMarkerProps) {
   const { map } = useMap();
   const callbacksRef = useRef({ onClick, onMouseEnter, onMouseLeave, onDragStart, onDrag, onDragEnd });
-  callbacksRef.current = { onClick, onMouseEnter, onMouseLeave, onDragStart, onDrag, onDragEnd };
+  useEffect(() => {
+    callbacksRef.current = { onClick, onMouseEnter, onMouseLeave, onDragStart, onDrag, onDragEnd };
+  }, [onClick, onMouseEnter, onMouseLeave, onDragStart, onDrag, onDragEnd]);
 
   const marker = useMemo(() => {
-    const markerInstance = new MapLibreGL.Marker({
+    return new MapLibreGL.Marker({
       ...markerOptions,
       element: document.createElement("div"),
       draggable,
     }).setLngLat([longitude, latitude]);
+  }, []);
 
+  useEffect(() => {
+    const el = marker.getElement();
     const handleClick = (event: MouseEvent) => callbacksRef.current.onClick?.(event);
     const handleMouseEnter = (event: MouseEvent) => callbacksRef.current.onMouseEnter?.(event);
     const handleMouseLeave = (event: MouseEvent) => callbacksRef.current.onMouseLeave?.(event);
-
-    markerInstance.getElement()?.addEventListener("click", handleClick);
-    markerInstance.getElement()?.addEventListener("mouseenter", handleMouseEnter);
-    markerInstance.getElement()?.addEventListener("mouseleave", handleMouseLeave);
-
-    markerInstance.on("dragstart", () => {
-      const lngLat = markerInstance.getLngLat();
+    const handleDragStart = () => {
+      const lngLat = marker.getLngLat();
       callbacksRef.current.onDragStart?.({ lng: lngLat.lng, lat: lngLat.lat });
-    });
-    markerInstance.on("drag", () => {
-      const lngLat = markerInstance.getLngLat();
+    };
+    const handleDrag = () => {
+      const lngLat = marker.getLngLat();
       callbacksRef.current.onDrag?.({ lng: lngLat.lng, lat: lngLat.lat });
-    });
-    markerInstance.on("dragend", () => {
-      const lngLat = markerInstance.getLngLat();
+    };
+    const handleDragEnd = () => {
+      const lngLat = marker.getLngLat();
       callbacksRef.current.onDragEnd?.({ lng: lngLat.lng, lat: lngLat.lat });
-    });
-    return markerInstance;
-  }, []);
+    };
+
+    el?.addEventListener("click", handleClick);
+    el?.addEventListener("mouseenter", handleMouseEnter);
+    el?.addEventListener("mouseleave", handleMouseLeave);
+    marker.on("dragstart", handleDragStart);
+    marker.on("drag", handleDrag);
+    marker.on("dragend", handleDragEnd);
+
+    return () => {
+      el?.removeEventListener("click", handleClick);
+      el?.removeEventListener("mouseenter", handleMouseEnter);
+      el?.removeEventListener("mouseleave", handleMouseLeave);
+      marker.off("dragstart", handleDragStart);
+      marker.off("drag", handleDrag);
+      marker.off("dragend", handleDragEnd);
+    };
+  }, [marker]);
 
   useEffect(() => {
     if (!map) return;
@@ -358,14 +375,16 @@ function MarkerTooltip({ children, className, ...popupOptions }: MarkerTooltipPr
     };
   }, [container, map, marker, tooltip]);
 
-  if (tooltip.isOpen()) {
-    const prev = prevTooltipOptions.current;
-    if (prev.offset !== popupOptions.offset) tooltip.setOffset(popupOptions.offset ?? 16);
-    if (prev.maxWidth !== popupOptions.maxWidth && popupOptions.maxWidth) {
-      tooltip.setMaxWidth(popupOptions.maxWidth ?? "none");
+  useEffect(() => {
+    if (tooltip.isOpen()) {
+      const prev = prevTooltipOptions.current;
+      if (prev.offset !== popupOptions.offset) tooltip.setOffset(popupOptions.offset ?? 16);
+      if (prev.maxWidth !== popupOptions.maxWidth && popupOptions.maxWidth) {
+        tooltip.setMaxWidth(popupOptions.maxWidth ?? "none");
+      }
+      prevTooltipOptions.current = popupOptions;
     }
-    prevTooltipOptions.current = popupOptions;
-  }
+  }, [tooltip, popupOptions]);
 
   return createPortal(
     <div

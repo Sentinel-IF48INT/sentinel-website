@@ -113,6 +113,7 @@ These accounts are for local development only. The login modal also has quick-fi
 | `npm run build` | Create a production build |
 | `npm run start` | Serve the production build |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run Vitest unit & route integration tests |
 
 ## Architecture
 
@@ -133,21 +134,38 @@ The project uses three layers: a presentation layer (React UI), an application l
 ```text
 sentinel-web/
 ├── app/
-│   ├── api/auth/login/route.ts   # POST /api/auth/login
+│   ├── api/
+│   │   ├── admin/destinations/route.ts # GET/PATCH risk overrides (ADMIN)
+│   │   ├── auth/login/route.ts         # POST /api/auth/login (sets HttpOnly cookie)
+│   │   ├── auth/logout/route.ts        # POST /api/auth/logout
+│   │   ├── auth/me/route.ts            # GET /api/auth/me
+│   │   ├── auth/register/route.ts      # POST /api/auth/register
+│   │   ├── destinations/route.ts       # GET /api/destinations?q=
+│   │   └── watchlist/route.ts          # GET/POST/DELETE /api/watchlist (TRAVELER)
 │   ├── globals.css
 │   ├── layout.tsx
-│   └── page.tsx                  # Main UI: search, alerts, map, watchlist, admin mode
+│   └── page.tsx                        # Main UI: search, alerts, map, watchlist, admin mode
 ├── components/
-│   ├── auth/login-modal.tsx      # Login dialog
-│   └── ui/mapcn-marker-content.tsx
+│   ├── auth/login-modal.tsx            # Sign-in & RegExp-validated registration dialog
+│   ├── destination/document-checklist.tsx # WNI pre-departure entry checklist
+│   └── ui/mapcn-marker-content.tsx     # MapLibre GL wrapper
 ├── db/
-│   ├── schema.sql                # PostgreSQL schema (3NF)
-│   └── seed.sql                  # Demo users and destinations
+│   ├── schema.sql                      # PostgreSQL schema (3NF)
+│   └── seed.sql                        # Demo users and 15 benchmark destinations
+├── docs/archive/django-skeleton/       # Archived legacy Django files
 ├── lib/
-│   ├── auth-service.ts           # Login logic
-│   ├── db.ts                     # Shared pg pool
-│   ├── models.ts                 # OOP domain model
+│   ├── auth-service.ts                 # Login & registration logic
+│   ├── db.ts                           # Shared pg pool
+│   ├── demo-store.ts                   # Shared in-memory store for demo-seed mode
+│   ├── destination-catalog.ts          # 15-country catalog & WNI document rules
+│   ├── destination-service.ts          # Search validation & profile controller
+│   ├── form-validators.ts              # RegExp registration validators
+│   ├── models.ts                       # OOP domain model
+│   ├── session.ts                      # HMAC-SHA256 signed HttpOnly cookie helpers
 │   └── utils.ts
+├── tests/
+│   ├── unit/                           # Domain model & validator tests
+│   └── integration/                    # API route & RBAC integration tests
 ├── public/
 ├── .env.example
 └── package.json
@@ -183,11 +201,13 @@ curl -X POST http://localhost:3000/api/auth/login \
 
 ## Testing
 
-12 manual test cases passed (4 positive, 8 negative), covering valid logins, case-insensitive email, wrong credentials, empty and malformed input, SQL injection, malformed JSON, sign-out, role-based UI gating and database outage (`503`).
+- **Automated tests (Vitest):** unit tests for domain entities (`lib/models.ts`) & RegExp validators (`lib/form-validators.ts`), plus API integration tests for `/api/destinations`, `/api/auth/*`, `/api/watchlist`, and `/api/admin/destinations`.
 
 ```bash
+npm test           # Vitest unit & integration tests
 npx tsc --noEmit   # type-check
 npm run lint       # lint
+npm run build      # production build
 ```
 
 ## Roadmap

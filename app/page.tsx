@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Map,
   MapMarker,
@@ -582,6 +582,74 @@ export default function SentinelMapPage() {
 
   const activeCountry = countries.find((c) => c.id === selectedId) ?? countries[0];
 
+  // Restore HttpOnly session and any persisted admin risk overrides on mount
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [meRes, overridesRes] = await Promise.all([
+          fetch("/api/auth/me"),
+          fetch("/api/admin/destinations"),
+        ]);
+        if (!active) return;
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData.authenticated && meData.user) {
+            setSessionUser(meData.user as SessionUser);
+          }
+        }
+        if (overridesRes.ok) {
+          const ovData = await overridesRes.json();
+          const overrides = ovData.overrides as Record<
+            string,
+            { riskLevel: 1 | 2 | 3 | 4; riskCategory: RiskCategory }
+          >;
+          if (overrides && Object.keys(overrides).length > 0) {
+            setCountries((prev) =>
+              prev.map((c) =>
+                overrides[c.id]
+                  ? {
+                      ...c,
+                      riskLevel: overrides[c.id].riskLevel,
+                      riskCategory: overrides[c.id].riskCategory,
+                    }
+                  : c,
+              ),
+            );
+          }
+        }
+      } catch {
+        // Ignore network errors on initial hydration
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Sync Traveler watchlist from backend when signed in
+  useEffect(() => {
+    if (sessionUser?.role !== "TRAVELER") return;
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/watchlist");
+        if (!res.ok || !active) return;
+        const data = await res.json();
+        if (Array.isArray(data.items)) {
+          setWatchlist(
+            data.items.map((item: { slug: string }) => item.slug),
+          );
+        }
+      } catch {
+        // Keep local state if offline
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [sessionUser]);
+
   const handleSelectCountry = (country: Destination) => {
     setInvalidQuery(null);
     setSelectedId(country.id);
@@ -708,20 +776,41 @@ export default function SentinelMapPage() {
     window.setTimeout(() => setLoginNotice(null), 5000);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Ignore network errors
+    }
     setSessionUser(null);
     setLoginNotice(null);
   };
 
-  const toggleWatchlist = (id: string) => {
+  const toggleWatchlist = async (id: string) => {
     if (!sessionUser) {
       setLoginOpen(true);
       return;
     }
     if (!canUseWatchlist) return;
+    const isSaved = watchlist.includes(id);
     setWatchlist((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [id, ...prev]
+      isSaved ? prev.filter((item) => item !== id) : [id, ...prev]
     );
+    try {
+      if (isSaved) {
+        await fetch(`/api/watchlist?slug=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+      } else {
+        await fetch("/api/watchlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ countrySlug: id }),
+        });
+      }
+    } catch {
+      // Keep optimistic state if offline
+    }
   };
 
   const resetWorldView = () => {
@@ -895,23 +984,36 @@ export default function SentinelMapPage() {
                 <button
                   key={lvl}
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
+                    const nextCategory: RiskCategory =
+                      lvl === 1
+                        ? "LOW"
+                        : lvl === 4
+                          ? "CRITICAL"
+                          : "ELEVATED";
                     setCountries((prev) =>
                       prev.map((c) =>
                         c.id === activeCountry.id
                           ? {
                               ...c,
                               riskLevel: lvl,
-                              riskCategory:
-                                lvl === 1
-                                  ? "LOW"
-                                  : lvl === 4
-                                    ? "CRITICAL"
-                                    : "ELEVATED",
+                              riskCategory: nextCategory,
                             }
                           : c
                       )
                     );
+                    try {
+                      await fetch("/api/admin/destinations", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          countrySlug: activeCountry.id,
+                          riskLevel: lvl,
+                        }),
+                      });
+                    } catch {
+                      // Keep optimistic UI state if offline
+                    }
                   }}
                   className={`font-mono text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
                     activeCountry.riskLevel === lvl

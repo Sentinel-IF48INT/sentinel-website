@@ -4,8 +4,11 @@
  * Flow:  validate input → parameterized SQL on `Users` → User.fromRow()
  *        → user.verifyPassword() → return PublicUserProfile.
  */
+import { randomBytes } from "node:crypto";
 import { getPool } from "./db";
-import { User, type PublicUserProfile } from "./models";
+import { getDemoStore } from "./demo-store";
+import { validateRegistrationInput } from "./form-validators";
+import { User, UserRole, type PublicUserProfile } from "./models";
 
 export type LoginDataSource = "postgresql" | "demo-seed";
 
@@ -33,34 +36,6 @@ export const FIND_USER_BY_EMAIL_SQL = `
   WHERE  LOWER(email) = LOWER($1)
   LIMIT  1;
 `;
-
-/**
- * In-memory mirror of db/seed.sql. Used ONLY when DATABASE_URL is not set,
- * so the Login demo still works on machines without PostgreSQL installed.
- * Demo password for both accounts: Sentinel@2026
- */
-const DEMO_SEED_USERS: UserRow[] = [
-  {
-    user_id: 1,
-    email: "raka.pratama@email.com",
-    username: "rakapratama",
-    first_name: "Raka",
-    last_name: "Pratama",
-    user_role: "TRAVELER",
-    password_hash:
-      "scrypt$5e4711e1a7a0b1c2d3e4f5a6b7c8d9e0$7839585252e91229bc6801c241d344a7bb47429e4548d0a30652ccd5dfa73141",
-  },
-  {
-    user_id: 2,
-    email: "dimas.handoko@email.com",
-    username: "dimashandoko",
-    first_name: "Dimas",
-    last_name: "Handoko",
-    user_role: "ADMINISTRATOR",
-    password_hash:
-      "scrypt$d1a5a0c0c0ffee00b1015000000000a1$bd4a6e5e583908abf975c60a7b070013543aa929deb524be0ffbf759e6cce8a0",
-  },
-];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const GENERIC_AUTH_ERROR = "Invalid email or password.";
@@ -95,7 +70,8 @@ export class AuthService {
       }
     } else {
       dataSource = "demo-seed";
-      row = DEMO_SEED_USERS.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      const store = getDemoStore();
+      row = store.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
     }
 
     // 3. Verify credentials via the domain model (same generic error for
@@ -109,5 +85,105 @@ export class AuthService {
 
     // 4. Success → only the safe public profile leaves the server
     return { ok: true, user: user.toPublicProfile(), dataSource };
+  }
+
+  /** Registers a new TRAVELER account (PostgreSQL or demo-seed). */
+  public static async register(rawInput: {
+    fullName?: unknown;
+    username?: unknown;
+    email?: unknown;
+    password?: unknown;
+    confirmPassword?: unknown;
+  }): Promise<
+    | { ok: true; user: PublicUserProfile; dataSource: LoginDataSource }
+    | { ok: false; status: 400 | 409 | 503; error: string }
+  > {
+    const validation = validateRegistrationInput({
+      fullName: typeof rawInput.fullName === "string" ? rawInput.fullName : "",
+      username: typeof rawInput.username === "string" ? rawInput.username : "",
+      email: typeof rawInput.email === "string" ? rawInput.email : "",
+      password: typeof rawInput.password === "string" ? rawInput.password : "",
+      confirmPassword:
+        typeof rawInput.confirmPassword === "string"
+          ? rawInput.confirmPassword
+          : "",
+    });
+
+    if (!validation.valid) {
+      const firstError =
+        Object.values(validation.errors)[0] ?? "Invalid registration input.";
+      return { ok: false, status: 400, error: firstError };
+    }
+
+    const { fullName, username, email, password } = validation.sanitized;
+    const nameParts = fullName.split(" ");
+    const firstName = nameParts[0] ?? fullName;
+    const lastName = nameParts.slice(1).join(" ");
+    const saltHex = randomBytes(16).toString("hex");
+    const passwordHash = User.hashPassword(password, saltHex);
+
+    const pool = getPool();
+    if (pool) {
+      try {
+        const existing = await pool.query<{ user_id: number }>(
+          `SELECT user_id FROM Users WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($2) LIMIT 1;`,
+          [email, username],
+        );
+        if (existing.rows.length > 0) {
+          return {
+            ok: false,
+            status: 409,
+            error: "An account with that email or username already exists.",
+          };
+        }
+
+        const inserted = await pool.query<UserRow>(
+          `INSERT INTO Users (email, username, first_name, last_name, user_role, password_hash)
+           VALUES ($1, $2, $3, $4, 'TRAVELER', $5)
+           RETURNING user_id, email, username, first_name, last_name, user_role, password_hash;`,
+          [email, username, firstName, lastName, passwordHash],
+        );
+        const user = User.fromRow(inserted.rows[0]);
+        return {
+          ok: true,
+          user: user.toPublicProfile(),
+          dataSource: "postgresql",
+        };
+      } catch (err) {
+        console.error("[AuthService] Register PostgreSQL failed:", err);
+        return {
+          ok: false,
+          status: 503,
+          error: "Registration service unavailable. Please try again later.",
+        };
+      }
+    }
+
+    const store = getDemoStore();
+    const duplicate = store.users.find(
+      (u) =>
+        u.email.toLowerCase() === email.toLowerCase() ||
+        u.username.toLowerCase() === username.toLowerCase(),
+    );
+    if (duplicate) {
+      return {
+        ok: false,
+        status: 409,
+        error: "An account with that email or username already exists.",
+      };
+    }
+
+    const newRow = {
+      user_id: store.nextUserId++,
+      email,
+      username,
+      first_name: firstName,
+      last_name: lastName,
+      user_role: UserRole.TRAVELER,
+      password_hash: passwordHash,
+    };
+    store.users.push(newRow);
+    const user = User.fromRow(newRow);
+    return { ok: true, user: user.toPublicProfile(), dataSource: "demo-seed" };
   }
 }
