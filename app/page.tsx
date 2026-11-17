@@ -25,9 +25,15 @@ import {
   LogIn,
   LogOut,
   CheckCircle2,
+  ExternalLink,
+  Clock,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import LoginModal, { type SessionUser } from "@/components/auth/login-modal";
 import DocumentChecklist from "@/components/destination/document-checklist";
+import WelcomeModal from "@/components/onboarding/welcome-modal";
+import type { VerificationSource } from "@/lib/advisory-sync";
 import { getRequiredDocumentsForCountry } from "@/lib/destination-catalog";
 import type { DestinationProfileDTO } from "@/lib/destination-service";
 
@@ -55,6 +61,8 @@ interface Destination {
   lat: number;
   imageUrl: string;
   lastUpdated: string;
+  feedStatus?: "live" | "cached" | "seed";
+  sources?: VerificationSource[];
   summary: string;
   alerts: SafetyAlert[];
   embassy: {
@@ -564,12 +572,19 @@ export default function SentinelMapPage() {
   const searchRequestId = useRef<number>(0);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [loginOpen, setLoginOpen] = useState<boolean>(false);
+  const [loginMode, setLoginMode] = useState<"signin" | "register">("signin");
+  const [welcomeOpen, setWelcomeOpen] = useState<boolean>(false);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>(["jpn", "aus", "syr"]);
   const [watchlistNotes, setWatchlistNotes] = useState<Record<string, string>>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>("");
   const [riskFilter, setRiskFilter] = useState<"ALL" | RiskCategory>("ALL");
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [syncingFeeds, setSyncingFeeds] = useState<boolean>(false);
+  const [newSourceName, setNewSourceName] = useState<string>("");
+  const [newSourceUrl, setNewSourceUrl] = useState<string>("");
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const role: "traveler" | "admin" = sessionUser?.role === "ADMINISTRATOR" ? "admin" : "traveler";
   const canUseWatchlist = sessionUser?.role === "TRAVELER";
   const [viewport, setViewport] = useState<{
@@ -586,42 +601,73 @@ export default function SentinelMapPage() {
 
   const activeCountry = countries.find((c) => c.id === selectedId) ?? countries[0];
 
-  // Restore HttpOnly session and any persisted admin risk overrides on mount
+  // Restore HttpOnly session, live advisory feeds, and persisted admin overrides on mount
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const [meRes, overridesRes] = await Promise.all([
+        const [meRes, overridesRes, advisoriesRes] = await Promise.all([
           fetch("/api/auth/me"),
           fetch("/api/admin/destinations"),
+          fetch("/api/advisories"),
         ]);
         if (!active) return;
         if (meRes.ok) {
           const meData = await meRes.json();
           if (meData.authenticated && meData.user) {
             setSessionUser(meData.user as SessionUser);
+          } else if (
+            typeof window !== "undefined" &&
+            !window.sessionStorage.getItem("sentinel_welcome_seen")
+          ) {
+            setWelcomeOpen(true);
           }
+        } else if (
+          typeof window !== "undefined" &&
+          !window.sessionStorage.getItem("sentinel_welcome_seen")
+        ) {
+          setWelcomeOpen(true);
         }
-        if (overridesRes.ok) {
-          const ovData = await overridesRes.json();
-          const overrides = ovData.overrides as Record<
-            string,
-            { riskLevel: 1 | 2 | 3 | 4; riskCategory: RiskCategory }
-          >;
-          if (overrides && Object.keys(overrides).length > 0) {
-            setCountries((prev) =>
-              prev.map((c) =>
-                overrides[c.id]
-                  ? {
-                      ...c,
-                      riskLevel: overrides[c.id].riskLevel,
-                      riskCategory: overrides[c.id].riskCategory,
-                    }
-                  : c,
-              ),
-            );
-          }
+        const liveAdvisories = advisoriesRes.ok
+          ? ((await advisoriesRes.json()) as {
+              lastSyncedAt?: string | null;
+              advisories?: Record<
+                string,
+                {
+                  riskLevel: 1 | 2 | 3 | 4;
+                  riskCategory: RiskCategory;
+                  lastUpdated: string;
+                  feedStatus: "live" | "cached" | "seed";
+                  sources: VerificationSource[];
+                }
+              >;
+            })
+          : null;
+        if (liveAdvisories?.lastSyncedAt) {
+          setLastSyncedAt(liveAdvisories.lastSyncedAt);
         }
+        const overrides = overridesRes.ok
+          ? ((await overridesRes.json()).overrides as Record<
+              string,
+              { riskLevel: 1 | 2 | 3 | 4; riskCategory: RiskCategory }
+            >)
+          : {};
+
+        setCountries((prev) =>
+          prev.map((c) => {
+            const live = liveAdvisories?.advisories?.[c.id];
+            const ov = overrides?.[c.id];
+            return {
+              ...c,
+              riskLevel: ov?.riskLevel ?? live?.riskLevel ?? c.riskLevel,
+              riskCategory:
+                ov?.riskCategory ?? live?.riskCategory ?? c.riskCategory,
+              lastUpdated: live?.lastUpdated ?? c.lastUpdated,
+              feedStatus: live?.feedStatus ?? c.feedStatus,
+              sources: live?.sources ?? c.sources,
+            };
+          }),
+        );
       } catch {
         // Ignore network errors on initial hydration
       }
@@ -673,14 +719,14 @@ export default function SentinelMapPage() {
   };
 
   /** UC-01 / UC-10: <<boundary>> → GET /api/destinations?q=… (<<controller>>). */
-  const handleSearchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const raw = searchQuery.trim();
+  const runDestinationSearch = async (rawQueryInput: string) => {
+    const raw = rawQueryInput.trim();
+    setSearchQuery(rawQueryInput);
 
     // 1. Validate input length locally (Alternative Flow 3a)
     if (!raw || raw.length > 80) {
       setSearchSource(null);
-      setInvalidQuery(searchQuery || "[EMPTY INPUT]");
+      setInvalidQuery(rawQueryInput || "[EMPTY INPUT]");
       return;
     }
 
@@ -696,7 +742,7 @@ export default function SentinelMapPage() {
       if (!res.ok) {
         if (requestId === searchRequestId.current) {
           setSearchSource(null);
-          setInvalidQuery(searchQuery);
+          setInvalidQuery(rawQueryInput);
         }
         return;
       }
@@ -707,7 +753,7 @@ export default function SentinelMapPage() {
       const profile = data.profile as DestinationProfileDTO | null;
       if (!profile) {
         setSearchSource(null);
-        setInvalidQuery(searchQuery);
+        setInvalidQuery(rawQueryInput);
         return;
       }
 
@@ -736,6 +782,8 @@ export default function SentinelMapPage() {
         lat: profile.lat ?? baseCountry.lat,
         imageUrl: profile.imageUrl ?? baseCountry.imageUrl,
         lastUpdated: profile.lastUpdated ?? baseCountry.lastUpdated,
+        feedStatus: profile.feedStatus ?? baseCountry.feedStatus,
+        sources: profile.sources ?? baseCountry.sources,
         summary: profile.summary ?? profile.generalInfo ?? baseCountry.summary,
         alerts: profile.activeAlerts.map((a) => ({
           id: a.id ?? `${slug}-${a.alertId}`,
@@ -768,13 +816,38 @@ export default function SentinelMapPage() {
         handleSelectCountry(matched);
       } else {
         setSearchSource(null);
-        setInvalidQuery(searchQuery);
+        setInvalidQuery(rawQueryInput);
       }
     } finally {
       if (requestId === searchRequestId.current) {
         setSearching(false);
       }
     }
+  };
+
+  const handleSearchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runDestinationSearch(searchQuery);
+  };
+
+  const dismissWelcomeGate = () => {
+    setWelcomeOpen(false);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("sentinel_welcome_seen", "1");
+    }
+  };
+
+  const handleWelcomeBegin = async (destinationQuery: string) => {
+    dismissWelcomeGate();
+    if (destinationQuery) {
+      await runDestinationSearch(destinationQuery);
+    }
+  };
+
+  const handleWelcomeOpenAuth = (mode: "signin" | "register") => {
+    dismissWelcomeGate();
+    setLoginMode(mode);
+    setLoginOpen(true);
   };
 
   const handleLoginSuccess = (user: SessionUser, dataSource: string) => {
@@ -842,6 +915,116 @@ export default function SentinelMapPage() {
       });
     } catch {
       // Keep optimistic note if offline
+    }
+  };
+
+  const formatUpdatedLabel = (isoOrDate: string) => {
+    const parsed = new Date(isoOrDate);
+    if (Number.isNaN(parsed.getTime())) return isoOrDate;
+    return parsed.toLocaleString("en-GB", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const handleSyncLiveApis = async () => {
+    setSyncingFeeds(true);
+    try {
+      const res = await fetch("/api/admin/sync-advisories", { method: "POST" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.lastSyncedAt) setLastSyncedAt(data.lastSyncedAt as string);
+      const advisories = data.advisories as Record<
+        string,
+        {
+          riskLevel: 1 | 2 | 3 | 4;
+          riskCategory: RiskCategory;
+          lastUpdated: string;
+          feedStatus: "live" | "cached" | "seed";
+          sources: VerificationSource[];
+        }
+      >;
+      if (advisories) {
+        setCountries((prev) =>
+          prev.map((c) =>
+            advisories[c.id]
+              ? {
+                  ...c,
+                  riskLevel: advisories[c.id].riskLevel,
+                  riskCategory: advisories[c.id].riskCategory,
+                  lastUpdated: advisories[c.id].lastUpdated,
+                  feedStatus: advisories[c.id].feedStatus,
+                  sources: advisories[c.id].sources,
+                }
+              : c,
+          ),
+        );
+      }
+    } finally {
+      setSyncingFeeds(false);
+    }
+  };
+
+  const handleAddSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSourceError(null);
+    const name = newSourceName.trim();
+    const url = newSourceUrl.trim();
+    if (!name || !url) {
+      setSourceError("Please enter both source name and https:// URL.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/admin/sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          countrySlug: activeCountry.id,
+          name,
+          url,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setSourceError(data.error ?? "Failed to add verification source.");
+        return;
+      }
+      const created = data.source as VerificationSource;
+      setCountries((prev) =>
+        prev.map((c) =>
+          c.id === activeCountry.id
+            ? { ...c, sources: [created, ...(c.sources ?? [])] }
+            : c,
+        ),
+      );
+      setNewSourceName("");
+      setNewSourceUrl("");
+    } catch {
+      setSourceError("Network error while adding source.");
+    }
+  };
+
+  const handleDeleteSource = async (sourceId: string) => {
+    setCountries((prev) =>
+      prev.map((c) =>
+        c.id === activeCountry.id
+          ? {
+              ...c,
+              sources: (c.sources ?? []).filter((s) => s.id !== sourceId),
+            }
+          : c,
+      ),
+    );
+    try {
+      await fetch(
+        `/api/admin/sources?slug=${encodeURIComponent(activeCountry.id)}&id=${encodeURIComponent(sourceId)}`,
+        { method: "DELETE" },
+      );
+    } catch {
+      // Keep optimistic removal
     }
   };
 
@@ -981,15 +1164,30 @@ export default function SentinelMapPage() {
                 onClick={() => setLoginOpen(true)}
                 className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 active:scale-[0.99] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-all"
               >
-                <LogIn className="size-4" /> Sign In
+                <LogIn className="size-4" /> Log In
               </button>
             )}
           </div>
         </div>
       </header>
 
+      <WelcomeModal
+        open={welcomeOpen}
+        destinations={countries.map((c) => ({
+          id: c.id,
+          iso: c.iso,
+          nameEn: c.nameEn,
+          nameId: c.nameId,
+          riskLevel: c.riskLevel,
+        }))}
+        onBegin={handleWelcomeBegin}
+        onOpenAuth={handleWelcomeOpenAuth}
+        onDismiss={dismissWelcomeGate}
+      />
+
       <LoginModal
         open={loginOpen}
+        initialMode={loginMode}
         onClose={() => setLoginOpen(false)}
         onSuccess={handleLoginSuccess}
       />
@@ -1063,6 +1261,18 @@ export default function SentinelMapPage() {
                   Set L{lvl}
                 </button>
               ))}
+              <button
+                id="admin-sync-live-btn"
+                type="button"
+                disabled={syncingFeeds}
+                onClick={handleSyncLiveApis}
+                className="ml-2 inline-flex items-center gap-1.5 rounded-lg bg-[#00968A] hover:bg-teal-600 disabled:opacity-60 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+              >
+                <RefreshCw
+                  className={`size-3.5 ${syncingFeeds ? "animate-spin" : ""}`}
+                />
+                {syncingFeeds ? "Syncing…" : "Sync Live API"}
+              </button>
             </div>
           </section>
         )}
@@ -1217,7 +1427,7 @@ export default function SentinelMapPage() {
                   <p className="leading-relaxed">
                     {sessionUser
                       ? "The Saved Watchlist (UC-8) is a Traveler feature. Administrators manage destination advisories instead."
-                      : "Sign in as a Traveler to bookmark destinations and track real-time KBRI safety alerts."}
+                      : "Log in as a Traveler to bookmark destinations and track real-time KBRI safety alerts."}
                   </p>
                   {!sessionUser && (
                     <button
@@ -1226,7 +1436,7 @@ export default function SentinelMapPage() {
                       onClick={() => setLoginOpen(true)}
                       className="inline-flex items-center gap-1.5 text-[#00968A] font-semibold hover:text-teal-800 hover:underline"
                     >
-                      <LogIn className="size-3.5" /> Sign In to Access
+                      <LogIn className="size-3.5" /> Log In to Access
                     </button>
                   )}
                 </div>
@@ -1476,9 +1686,28 @@ export default function SentinelMapPage() {
                     >
                       {activeTheme.sub}
                     </span>
-                    <span className="font-mono text-[11px] text-slate-500">
-                      • ISO: {activeCountry.iso} • Updated{" "}
-                      {activeCountry.lastUpdated}
+                    <span className="font-mono text-[11px] text-slate-600 inline-flex items-center gap-1.5">
+                      <span>• ISO: {activeCountry.iso}</span>
+                      <span>•</span>
+                      <Clock className="size-3 text-[#00968A]" />
+                      <span>
+                        Last Updated: {formatUpdatedLabel(activeCountry.lastUpdated)}
+                      </span>
+                    </span>
+                    <span
+                      className={`font-mono text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ${
+                        activeCountry.feedStatus === "live"
+                          ? "bg-emerald-50 text-emerald-800 ring-emerald-600/25"
+                          : activeCountry.feedStatus === "cached"
+                            ? "bg-sky-50 text-sky-800 ring-sky-600/25"
+                            : "bg-white/70 text-slate-600 ring-slate-300/80"
+                      }`}
+                    >
+                      {activeCountry.feedStatus === "live"
+                        ? "Live Risk API"
+                        : activeCountry.feedStatus === "cached"
+                          ? "Cached API Feed"
+                          : "Curated Seed"}
                     </span>
                   </div>
                   <h3 className="text-xl font-bold tracking-tight text-slate-900">
@@ -1503,7 +1732,7 @@ export default function SentinelMapPage() {
                   >
                     <Bookmark className="size-4 text-teal-600" />
                     {!sessionUser
-                      ? "Sign in to Save"
+                      ? "Log in to Save"
                       : watchlist.includes(activeCountry.id)
                         ? "Saved in Watchlist"
                         : "Save to Watchlist"}
@@ -1593,6 +1822,123 @@ export default function SentinelMapPage() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Clickable Verification Sources (Automated Official Feeds + Admin Curated) */}
+            <div className="sentinel-no-print sentinel-glass rounded-3xl p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 pb-3">
+                <div>
+                  <h4 className="text-base font-bold tracking-tight text-slate-900">
+                    Official Verification Sources
+                  </h4>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Click any source below to verify travel advisories directly from government and diplomatic portals.
+                  </p>
+                </div>
+                <span className="font-mono text-[11px] text-slate-600 inline-flex items-center gap-1.5">
+                  <Clock className="size-3.5 text-[#00968A]" />
+                  {lastSyncedAt
+                    ? `Synced: ${formatUpdatedLabel(lastSyncedAt)}`
+                    : `Updated: ${formatUpdatedLabel(activeCountry.lastUpdated)}`}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(activeCountry.sources && activeCountry.sources.length > 0
+                  ? activeCountry.sources
+                  : [
+                      {
+                        id: `kemlu-fallback-${activeCountry.id}`,
+                        name: "Kemlu RI — Peduli WNI Portal",
+                        url: "https://peduliwni.kemlu.go.id/",
+                        origin: "AUTOMATED" as const,
+                        publishedAt: activeCountry.lastUpdated,
+                        fetchedAt: activeCountry.lastUpdated,
+                      },
+                    ]
+                ).map((src) => (
+                  <div
+                    key={src.id}
+                    className="flex items-start justify-between gap-2 rounded-2xl bg-white/55 backdrop-blur-md p-3.5 ring-1 ring-white/80 hover:bg-white/80 transition-all"
+                  >
+                    <a
+                      href={src.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-w-0 flex-1 group space-y-1"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-[#021B43] group-hover:text-[#00968A] truncate transition-colors">
+                          {src.name}
+                        </span>
+                        <ExternalLink className="size-3.5 text-[#00968A] shrink-0" />
+                      </div>
+                      <p className="text-[11px] text-slate-500 truncate">
+                        {src.url}
+                      </p>
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ${
+                            src.origin === "ADMIN"
+                              ? "bg-teal-50 text-teal-800 ring-teal-600/20"
+                              : "bg-slate-100/90 text-slate-700 ring-slate-300/70"
+                          }`}
+                        >
+                          {src.origin === "ADMIN" ? "Admin Verified" : "Automated Feed"}
+                        </span>
+                        {src.publishedAt && (
+                          <span className="text-[10px] text-slate-500">
+                            {formatUpdatedLabel(src.publishedAt)}
+                          </span>
+                        )}
+                      </div>
+                    </a>
+                    {role === "admin" && src.origin === "ADMIN" && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSource(src.id)}
+                        aria-label={`Remove ${src.name}`}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {role === "admin" && (
+                <form
+                  onSubmit={handleAddSource}
+                  className="pt-3 border-t border-slate-200/60 flex flex-col sm:flex-row gap-2"
+                >
+                  <input
+                    type="text"
+                    value={newSourceName}
+                    onChange={(e) => setNewSourceName(e.target.value)}
+                    placeholder="Source title (e.g., KBRI Tokyo Notice)"
+                    className="sm:w-64 rounded-xl border border-white/80 bg-white/65 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-500 focus:outline-none focus:bg-white focus:border-[#00968A]"
+                  />
+                  <input
+                    type="url"
+                    value={newSourceUrl}
+                    onChange={(e) => setNewSourceUrl(e.target.value)}
+                    placeholder="https://kemlu.go.id/..."
+                    className="flex-1 rounded-xl border border-white/80 bg-white/65 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-500 focus:outline-none focus:bg-white focus:border-[#00968A]"
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#021B43] hover:bg-[#032863] text-white px-3.5 py-2 text-xs font-semibold transition-colors"
+                  >
+                    <Plus className="size-3.5" /> Add Source
+                  </button>
+                </form>
+              )}
+              {sourceError && (
+                <p role="alert" className="text-xs font-medium text-rose-600">
+                  {sourceError}
+                </p>
+              )}
             </div>
 
             <DocumentChecklist

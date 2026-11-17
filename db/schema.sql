@@ -4,6 +4,7 @@
 --  Run:   psql -U postgres -d sentinel -f db/schema.sql
 -- ============================================================================
 
+DROP TABLE IF EXISTS AdvisorySource;
 DROP TABLE IF EXISTS Watchlist;
 DROP TABLE IF EXISTS EmergencyContact;
 DROP TABLE IF EXISTS SafetyAlert;
@@ -60,4 +61,15 @@ CREATE TABLE Watchlist (
     reminder_note          VARCHAR(255),
     saved_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_watchlist_user_destination UNIQUE (user_id, destination_country_id)
+);
+
+-- 6. AdvisorySource (clickable verification sources: AUTOMATED / ADMIN) -----
+CREATE TABLE AdvisorySource (
+    source_id              SERIAL       PRIMARY KEY,
+    destination_country_id INT          NOT NULL REFERENCES Destination(country_id) ON DELETE CASCADE,
+    source_name            VARCHAR(150) NOT NULL,
+    source_url             VARCHAR(500) NOT NULL,
+    source_origin          VARCHAR(20)  NOT NULL CHECK (source_origin IN ('AUTOMATED', 'ADMIN')),
+    published_at           TIMESTAMPTZ,
+    updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );

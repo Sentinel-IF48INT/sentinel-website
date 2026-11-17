@@ -103,7 +103,12 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
-  getDemoStore().riskOverrides.set(entry.slug, { riskLevel, riskCategory });
+  const updatedAt = new Date().toISOString();
+  getDemoStore().riskOverrides.set(entry.slug, {
+    riskLevel,
+    riskCategory,
+    updatedAt,
+  });
 
   return NextResponse.json(
     {
@@ -112,6 +117,7 @@ export async function PATCH(request: NextRequest) {
       slug: entry.slug,
       riskLevel,
       riskCategory,
+      updatedAt,
     },
     { status: 200 },
   );

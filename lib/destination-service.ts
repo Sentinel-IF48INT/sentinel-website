@@ -6,6 +6,10 @@
  *   - In-memory 15-country catalog (`demo-seed`) when DATABASE_URL is omitted
  */
 
+import {
+  getEnrichedCountryAdvisory,
+  type VerificationSource,
+} from "./advisory-sync";
 import { getPool } from "./db";
 import { getDemoStore } from "./demo-store";
 import {
@@ -37,6 +41,9 @@ export interface DestinationProfileDTO {
   lat: number;
   imageUrl: string;
   lastUpdated: string;
+  lastSyncedAt: string | null;
+  feedStatus: "live" | "cached" | "seed";
+  sources: VerificationSource[];
   summary: string;
   generalInfo: string;
   destination: {
@@ -97,9 +104,16 @@ function riskLevelToSeverity(
 function buildDTOFromEntities(
   dest: Destination,
   catalogMeta: CatalogDestinationEntry,
+  enrichment?: {
+    lastUpdated: string;
+    lastSyncedAt: string | null;
+    feedStatus: "live" | "cached" | "seed";
+    sources: VerificationSource[];
+  },
 ): DestinationProfileDTO {
   const profile = dest.getSafetyProfile();
   const primaryContact = profile.emergencyContacts[0];
+  const lastUpdated = enrichment?.lastUpdated ?? catalogMeta.lastUpdated;
 
   return {
     slug: catalogMeta.slug,
@@ -113,7 +127,10 @@ function buildDTOFromEntities(
     lng: catalogMeta.lng,
     lat: catalogMeta.lat,
     imageUrl: catalogMeta.imageUrl,
-    lastUpdated: catalogMeta.lastUpdated,
+    lastUpdated,
+    lastSyncedAt: enrichment?.lastSyncedAt ?? null,
+    feedStatus: enrichment?.feedStatus ?? "seed",
+    sources: enrichment?.sources ?? [],
     summary: dest.getGeneralInfo(),
     generalInfo: dest.getGeneralInfo(),
     destination: {
@@ -257,13 +274,15 @@ export class DestinationController {
           dest.addEmergencyContact(EmergencyContact.fromRow(contactRow));
         }
 
+        const enrichment = await getEnrichedCountryAdvisory(catalogMatch);
+
         return {
           ok: true,
           status: 200,
           code: "OK",
           dataSource: "postgresql",
           query: validation.normalized,
-          profile: buildDTOFromEntities(dest, catalogMatch),
+          profile: buildDTOFromEntities(dest, catalogMatch, enrichment),
         };
       } catch (err) {
         console.error("[DestinationController] PostgreSQL query failed:", err);
@@ -279,14 +298,15 @@ export class DestinationController {
       }
     }
 
-    // Demo-seed mode (with any in-memory admin risk overrides applied)
+    // Demo-seed mode (enriched with live API feeds + admin sources + overrides)
+    const enrichment = await getEnrichedCountryAdvisory(catalogMatch);
     const demoOverride = getDemoStore().riskOverrides.get(catalogMatch.slug);
     const effectiveCategory = demoOverride
       ? demoOverride.riskCategory
-      : (catalogMatch.riskCategory as RiskCategory);
+      : enrichment.riskCategory;
     const effectiveRiskLevel = demoOverride
       ? demoOverride.riskLevel
-      : catalogMatch.riskLevel;
+      : enrichment.riskLevel;
 
     const dest = new Destination(
       catalogMatch.countryId,
@@ -316,8 +336,8 @@ export class DestinationController {
       ),
     );
 
-    const dto = buildDTOFromEntities(dest, catalogMatch);
-    // Ensure riskLevel reflects admin override even when alert level differs
+    const dto = buildDTOFromEntities(dest, catalogMatch, enrichment);
+    // Ensure riskLevel reflects admin override or live API level
     dto.riskLevel = effectiveRiskLevel;
 
     return {

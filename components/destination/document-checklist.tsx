@@ -72,6 +72,7 @@ export function DocumentChecklist({
   embassy,
 }: DocumentChecklistProps) {
   const [pdfNotice, setPdfNotice] = useState<string>("");
+  const [generatedDate, setGeneratedDate] = useState<string>("");
   const storageKey = `sentinel_checklist_${countryIsoOrId.toLowerCase()}`;
   const validDocIds = useMemo(
     () => new Set(documents.map((doc) => doc.id)),
@@ -171,6 +172,7 @@ export function DocumentChecklist({
       .replace(/[^A-Z0-9_-]/g, "");
     document.title = `SENTINEL-WNI-Checklist-${safeIso}`;
     document.body.classList.add("printing-checklist");
+    setGeneratedDate(new Date().toISOString().slice(0, 10));
     setPdfNotice(`Preparing PDF checklist for ${countryName}.`);
 
     const cleanup = () => {
@@ -180,9 +182,11 @@ export function DocumentChecklist({
     };
     window.addEventListener("afterprint", cleanup);
 
-    window.print();
-    // Fallback cleanup in case afterprint does not fire in some environments
-    window.setTimeout(cleanup, 1500);
+    window.requestAnimationFrame(() => {
+      window.print();
+      // Fallback cleanup in case afterprint does not fire in some environments
+      window.setTimeout(cleanup, 1500);
+    });
   };
 
   const riskSummaryLabel =
@@ -415,7 +419,7 @@ export function DocumentChecklist({
                 {readyCount} / {totalCount} ({percentage}%)
               </strong>
             </p>
-            <p>Generated: {new Date().toISOString().slice(0, 10)}</p>
+            {generatedDate && <p>Generated: {generatedDate}</p>}
           </div>
         </header>
 

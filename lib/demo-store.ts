@@ -26,10 +26,24 @@ export interface DemoWatchlistRecord {
   saved_at: string;
 }
 
+export interface DemoSourceRecord {
+  id: string;
+  slug: string;
+  name: string;
+  url: string;
+  origin: "AUTOMATED" | "ADMIN";
+  publishedAt?: string;
+  fetchedAt: string;
+}
+
 interface DemoStoreState {
   users: DemoUserRecord[];
   watchlists: Map<number, DemoWatchlistRecord[]>;
-  riskOverrides: Map<string, { riskLevel: RiskLevel; riskCategory: RiskCategory }>;
+  riskOverrides: Map<
+    string,
+    { riskLevel: RiskLevel; riskCategory: RiskCategory; updatedAt: string }
+  >;
+  customSources: Map<string, DemoSourceRecord[]>;
   nextUserId: number;
   nextWatchlistId: number;
 }
@@ -93,6 +107,7 @@ function createInitialStore(): DemoStoreState {
     ],
     watchlists,
     riskOverrides: new Map(),
+    customSources: new Map(),
     nextUserId: 3,
     nextWatchlistId: 4,
   };

@@ -33,6 +33,7 @@ export interface SessionUser {
 
 interface LoginModalProps {
   open: boolean;
+  initialMode?: AuthModalMode;
   onClose: () => void;
   onSuccess: (user: SessionUser, dataSource: string) => void;
 }
@@ -133,10 +134,11 @@ function getFieldInputClasses(hasError: boolean, isValid: boolean, withRightPad 
  */
 export default function LoginModal({
   open,
+  initialMode = "signin",
   onClose,
   onSuccess,
 }: LoginModalProps) {
-  const [mode, setMode] = useState<AuthModalMode>("signin");
+  const [mode, setMode] = useState<AuthModalMode>(initialMode);
 
   // Sign In state
   const [email, setEmail] = useState("");
@@ -159,6 +161,17 @@ export default function LoginModal({
 
   const emailRef = useRef<HTMLInputElement>(null);
   const fullNameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    queueMicrotask(() => {
+      setMode(initialMode);
+      setError(null);
+      if (initialMode === "signin") {
+        setRegisteredAccount(null);
+      }
+    });
+  }, [open, initialMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -440,7 +453,7 @@ export default function LoginModal({
                 : "text-slate-500 hover:text-slate-800"
             }`}
           >
-            Sign In
+            Log In
           </button>
           <button
             id="auth-tab-register"
@@ -473,7 +486,7 @@ export default function LoginModal({
               className="text-xl font-bold tracking-tight text-slate-900"
             >
               {mode === "signin"
-                ? "Sign in to Sentinel"
+                ? "Log in to Sentinel"
                 : "Create Sentinel Account"}
             </h2>
             <p className="text-sm text-slate-500 mt-0.5">
@@ -561,7 +574,7 @@ export default function LoginModal({
               ) : (
                 <LogIn className="size-4" />
               )}
-              {loading ? "Verifying credentials…" : "Sign In"}
+              {loading ? "Verifying credentials…" : "Log In"}
             </button>
 
             {/* Quick-Fill Demo Account Cards */}
@@ -618,7 +631,7 @@ export default function LoginModal({
                 </h3>
                 <p className="mt-0.5 text-xs leading-relaxed text-emerald-800">
                   All inputs passed strict client-side RegExp checks. Start a
-                  session directly or switch to Sign In.
+                  session directly or switch to Log In.
                 </p>
               </div>
             </div>
@@ -670,7 +683,7 @@ export default function LoginModal({
                   }}
                   className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
                 >
-                  Back to Sign In
+                  Back to Log In
                 </button>
                 <button
                   type="button"
