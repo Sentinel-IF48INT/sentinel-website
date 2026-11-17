@@ -566,6 +566,10 @@ export default function SentinelMapPage() {
   const [loginOpen, setLoginOpen] = useState<boolean>(false);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>(["jpn", "aus", "syr"]);
+  const [watchlistNotes, setWatchlistNotes] = useState<Record<string, string>>({});
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<string>("");
+  const [riskFilter, setRiskFilter] = useState<"ALL" | RiskCategory>("ALL");
   const role: "traveler" | "admin" = sessionUser?.role === "ADMINISTRATOR" ? "admin" : "traveler";
   const canUseWatchlist = sessionUser?.role === "TRAVELER";
   const [viewport, setViewport] = useState<{
@@ -640,6 +644,14 @@ export default function SentinelMapPage() {
           setWatchlist(
             data.items.map((item: { slug: string }) => item.slug),
           );
+          const notesMap: Record<string, string> = {};
+          for (const item of data.items as Array<{
+            slug: string;
+            reminderNote?: string | null;
+          }>) {
+            if (item.reminderNote) notesMap[item.slug] = item.reminderNote;
+          }
+          setWatchlistNotes(notesMap);
         }
       } catch {
         // Keep local state if offline
@@ -813,6 +825,26 @@ export default function SentinelMapPage() {
     }
   };
 
+  const saveWatchlistNote = async (slug: string) => {
+    const trimmed = noteDraft.trim().slice(0, 255);
+    setWatchlistNotes((prev) => {
+      const next = { ...prev };
+      if (trimmed) next[slug] = trimmed;
+      else delete next[slug];
+      return next;
+    });
+    setEditingNoteId(null);
+    try {
+      await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ countrySlug: slug, reminderNote: trimmed }),
+      });
+    } catch {
+      // Keep optimistic note if offline
+    }
+  };
+
   const resetWorldView = () => {
     setViewport({
       center: [60, 15],
@@ -825,57 +857,60 @@ export default function SentinelMapPage() {
   const getRiskStyle = (level: 1 | 2 | 3 | 4) => {
     if (level === 1) {
       return {
+        glyph: "●",
         badge: "LEVEL 1 • LOW RISK",
         code: "L1",
         sub: "EXERCISE NORMAL PRECAUTIONS",
         bannerBg:
-          "bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 ring-1 ring-emerald-500/25 border-l-4 border-l-emerald-600 text-slate-900",
-        iconWrap: "bg-emerald-600 text-white shadow-sm shadow-emerald-600/20",
+          "bg-gradient-to-br from-emerald-50/60 via-white/45 to-teal-50/50 backdrop-blur-2xl ring-1 ring-emerald-500/25 border border-white/75 border-l-4 border-l-emerald-600 shadow-[0_14px_38px_-10px_rgba(0,150,138,0.16)] text-slate-900",
+        iconWrap: "bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm shadow-emerald-600/25",
         badgeBg:
-          "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-600/20",
+          "bg-emerald-100/90 text-emerald-900 ring-1 ring-emerald-600/20",
         subText: "text-emerald-800",
         pinBg: "bg-emerald-500 border-white",
         chipIdle:
-          "bg-slate-50/80 text-slate-700 ring-1 ring-slate-200/90 hover:bg-emerald-50/70 hover:text-emerald-900 hover:ring-emerald-300",
+          "bg-white/50 backdrop-blur-md text-slate-800 ring-1 ring-white/75 hover:bg-emerald-50/75 hover:text-emerald-950 hover:ring-emerald-300",
         chipActive:
-          "bg-emerald-600 text-white ring-2 ring-emerald-600/30 shadow-xs",
+          "bg-gradient-to-r from-emerald-600 to-teal-600 text-white ring-2 ring-emerald-600/30 shadow-sm",
         chipCode: "text-emerald-700",
         Icon: ShieldCheck,
       };
     }
     if (level === 2 || level === 3) {
       return {
+        glyph: "▲",
         badge: `LEVEL ${level} • ELEVATED RISK`,
         code: `L${level}`,
         sub: level === 2 ? "EXERCISE INCREASED CAUTION" : "RECONSIDER TRAVEL",
         bannerBg:
-          "bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 ring-1 ring-amber-500/30 border-l-4 border-l-amber-500 text-slate-900",
-        iconWrap: "bg-amber-500 text-white shadow-sm shadow-amber-500/20",
-        badgeBg: "bg-amber-100 text-amber-900 ring-1 ring-amber-600/25",
+          "bg-gradient-to-br from-amber-50/60 via-white/45 to-orange-50/45 backdrop-blur-2xl ring-1 ring-amber-500/30 border border-white/75 border-l-4 border-l-amber-500 shadow-[0_14px_38px_-10px_rgba(245,158,11,0.18)] text-slate-900",
+        iconWrap: "bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm shadow-amber-500/25",
+        badgeBg: "bg-amber-100/90 text-amber-900 ring-1 ring-amber-600/25",
         subText: "text-amber-800",
         pinBg: "bg-amber-500 border-white",
         chipIdle:
-          "bg-slate-50/80 text-slate-700 ring-1 ring-slate-200/90 hover:bg-amber-50/80 hover:text-amber-900 hover:ring-amber-300",
+          "bg-white/50 backdrop-blur-md text-slate-800 ring-1 ring-white/75 hover:bg-amber-50/80 hover:text-amber-950 hover:ring-amber-300",
         chipActive:
-          "bg-amber-500 text-white ring-2 ring-amber-500/30 shadow-xs",
+          "bg-gradient-to-r from-amber-500 to-orange-500 text-white ring-2 ring-amber-500/30 shadow-sm",
         chipCode: "text-amber-700",
         Icon: AlertTriangle,
       };
     }
     return {
+      glyph: "◆",
       badge: "LEVEL 4 • CRITICAL RISK",
       code: "L4",
       sub: "DO NOT TRAVEL — HIGH RISK",
       bannerBg:
-        "bg-gradient-to-br from-rose-50/90 via-white to-rose-50/40 ring-1 ring-rose-500/30 border-l-4 border-l-rose-600 text-slate-900",
-      iconWrap: "bg-rose-600 text-white shadow-sm shadow-rose-600/25",
-      badgeBg: "bg-rose-100 text-rose-900 ring-1 ring-rose-600/25",
+        "bg-gradient-to-br from-rose-50/60 via-white/45 to-red-50/45 backdrop-blur-2xl ring-1 ring-rose-500/30 border border-white/75 border-l-4 border-l-rose-600 shadow-[0_14px_38px_-10px_rgba(225,29,72,0.18)] text-slate-900",
+      iconWrap: "bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-sm shadow-rose-600/25",
+      badgeBg: "bg-rose-100/90 text-rose-900 ring-1 ring-rose-600/25",
       subText: "text-rose-800",
       pinBg: "bg-rose-600 border-white",
       chipIdle:
-        "bg-slate-50/80 text-slate-700 ring-1 ring-slate-200/90 hover:bg-rose-50/80 hover:text-rose-900 hover:ring-rose-300",
+        "bg-white/50 backdrop-blur-md text-slate-800 ring-1 ring-white/75 hover:bg-rose-50/80 hover:text-rose-950 hover:ring-rose-300",
       chipActive:
-        "bg-rose-600 text-white ring-2 ring-rose-600/30 shadow-xs",
+        "bg-gradient-to-r from-rose-600 to-red-600 text-white ring-2 ring-rose-600/30 shadow-sm",
       chipCode: "text-rose-700",
       Icon: ShieldAlert,
     };
@@ -883,14 +918,18 @@ export default function SentinelMapPage() {
 
   const activeTheme = getRiskStyle(activeCountry.riskLevel);
   const ActiveIcon = activeTheme.Icon;
+  const filteredCountries =
+    riskFilter === "ALL"
+      ? countries
+      : countries.filter((c) => c.riskCategory === riskFilter);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased">
+    <div className="min-h-screen sentinel-mesh-bg text-slate-900 font-sans antialiased pb-24 md:pb-10">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/80">
+      <header className="sticky top-0 z-30 bg-white/55 backdrop-blur-2xl border-b border-white/70 shadow-[0_4px_24px_rgba(2,27,67,0.05)]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="size-10 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 text-white font-bold text-lg flex items-center justify-center shadow-sm shadow-teal-700/20 ring-1 ring-teal-600/20">
+            <div className="size-10 rounded-2xl bg-gradient-to-br from-[#00968A] to-[#021B43] text-white font-bold text-lg flex items-center justify-center shadow-md shadow-teal-800/20 ring-1 ring-inset ring-white/25">
               S
             </div>
             <div>
@@ -1029,8 +1068,8 @@ export default function SentinelMapPage() {
         )}
 
         {/* Search & Watchlist Bento Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <section className="lg:col-span-2 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80">
+        <div id="search-section" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <section className="lg:col-span-2 sentinel-glass rounded-3xl p-6">
             <form onSubmit={handleSearchSubmit} className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label
@@ -1053,14 +1092,14 @@ export default function SentinelMapPage() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search country (e.g., Japan, Jepang, Prancis, Suriah, Australia)..."
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 pl-10 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 transition focus:outline-none focus:bg-white focus:border-teal-600 focus:ring-4 focus:ring-teal-500/15"
+                    className="w-full rounded-2xl border border-white/80 bg-white/55 backdrop-blur-md pl-10 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-500 transition focus:outline-none focus:bg-white/85 focus:border-[#00968A] focus:ring-4 focus:ring-teal-500/15"
                   />
                 </div>
                 <div className="flex gap-2">
                   <button
                     type="submit"
                     disabled={searching}
-                    className="rounded-xl bg-teal-600 hover:bg-teal-700 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm px-5 py-2.5 shadow-2xs transition-all inline-flex items-center justify-center gap-2"
+                    className="rounded-2xl bg-gradient-to-r from-[#00968A] to-teal-700 hover:brightness-105 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm px-5 py-2.5 shadow-sm shadow-teal-700/20 transition-all inline-flex items-center justify-center gap-2"
                   >
                     <Search className="size-4" />
                     {searching ? "Searching…" : "Search"}
@@ -1071,18 +1110,53 @@ export default function SentinelMapPage() {
                       setSearchQuery("");
                       setInvalidQuery(null);
                       setSearchSource(null);
+                      setRiskFilter("ALL");
                       handleSelectCountry(countries[0]);
                     }}
-                    className="rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 font-medium text-sm px-3.5 py-2.5 transition-colors inline-flex items-center justify-center gap-1.5"
+                    className="rounded-2xl bg-white/80 hover:bg-white text-slate-700 ring-1 ring-slate-200/80 font-medium text-sm px-3.5 py-2.5 transition-colors inline-flex items-center justify-center gap-1.5"
                   >
                     <RotateCcw className="size-3.5" /> Reset
                   </button>
                 </div>
               </div>
 
+              {/* Risk Band Filter Pills (Geopolitical Threat Triage) */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                {(
+                  [
+                    { key: "ALL", label: `All (${countries.length})` },
+                    {
+                      key: "LOW",
+                      label: `● Low (${countries.filter((c) => c.riskCategory === "LOW").length})`,
+                    },
+                    {
+                      key: "ELEVATED",
+                      label: `▲ Elevated (${countries.filter((c) => c.riskCategory === "ELEVATED").length})`,
+                    },
+                    {
+                      key: "CRITICAL",
+                      label: `◆ Critical (${countries.filter((c) => c.riskCategory === "CRITICAL").length})`,
+                    },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setRiskFilter(tab.key)}
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold transition-all ${
+                      riskFilter === tab.key
+                        ? "bg-[#021B43] text-white shadow-xs"
+                        : "bg-slate-100/80 text-slate-600 hover:bg-slate-200/70"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
               {/* Quick-Select Country Chips */}
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {countries.map((c) => {
+                {filteredCountries.map((c) => {
                   const chipStyle = getRiskStyle(c.riskLevel);
                   const isActive = c.id === selectedId && !invalidQuery;
                   return (
@@ -1090,16 +1164,16 @@ export default function SentinelMapPage() {
                       key={c.id}
                       type="button"
                       onClick={() => handleSelectCountry(c)}
-                      className={`rounded-lg text-xs font-medium px-3 py-1.5 transition-all inline-flex items-center gap-1.5 ${
+                      className={`rounded-xl text-xs font-medium px-3 py-1.5 transition-all inline-flex items-center gap-1.5 ${
                         isActive ? chipStyle.chipActive : chipStyle.chipIdle
                       }`}
                     >
                       <span
                         className={`font-mono text-[10px] font-semibold ${
-                          isActive ? "text-white/90" : chipStyle.chipCode
+                          isActive ? "text-white/95" : chipStyle.chipCode
                         }`}
                       >
-                        L{c.riskLevel}
+                        {chipStyle.glyph} L{c.riskLevel}
                       </span>
                       <span>{c.nameEn}</span>
                     </button>
@@ -1127,19 +1201,19 @@ export default function SentinelMapPage() {
           </section>
 
           {/* Watchlist Panel */}
-          <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80 flex flex-col justify-between">
+          <section className="sentinel-glass rounded-3xl p-6 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                  <Bookmark className="size-4 text-teal-600" /> Saved Watchlist
+                  <Bookmark className="size-4 text-[#00968A]" /> Saved Watchlist
                   (UC-8)
                 </h2>
-                <span className="font-mono text-xs font-semibold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full ring-1 ring-slate-200">
+                <span className="font-mono text-xs font-semibold bg-white/85 text-slate-700 px-2.5 py-0.5 rounded-full ring-1 ring-slate-200/80">
                   {canUseWatchlist ? watchlist.length : 0} Saved
                 </span>
               </div>
               {!canUseWatchlist ? (
-                <div className="text-xs text-slate-600 bg-slate-50/80 border border-dashed border-slate-200 rounded-xl p-4 space-y-2.5">
+                <div className="text-xs text-slate-700 bg-white/40 backdrop-blur-md border border-dashed border-slate-300/80 rounded-2xl p-4 space-y-2.5">
                   <p className="leading-relaxed">
                     {sessionUser
                       ? "The Saved Watchlist (UC-8) is a Traveler feature. Administrators manage destination advisories instead."
@@ -1150,66 +1224,107 @@ export default function SentinelMapPage() {
                       id="watchlist-login-btn"
                       type="button"
                       onClick={() => setLoginOpen(true)}
-                      className="inline-flex items-center gap-1.5 text-teal-700 font-semibold hover:text-teal-800 hover:underline"
+                      className="inline-flex items-center gap-1.5 text-[#00968A] font-semibold hover:text-teal-800 hover:underline"
                     >
                       <LogIn className="size-3.5" /> Sign In to Access
                     </button>
                   )}
                 </div>
               ) : (
-                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
                   {watchlist.map((wId) => {
                     const item = countries.find((c) => c.id === wId);
                     if (!item) return null;
                     const itemStyle = getRiskStyle(item.riskLevel);
+                    const note = watchlistNotes[item.id];
+                    const isEditing = editingNoteId === item.id;
                     return (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between text-xs bg-slate-50/80 hover:bg-slate-100/80 px-3 py-2 rounded-xl ring-1 ring-slate-200/80 transition-colors"
+                        className="text-xs bg-white/50 hover:bg-white/75 backdrop-blur-md px-3 py-2.5 rounded-2xl ring-1 ring-white/80 transition-all space-y-1.5"
                       >
-                        <button
-                          type="button"
-                          onClick={() => handleSelectCountry(item)}
-                          className="font-semibold text-slate-800 text-left hover:text-teal-700 inline-flex items-center gap-2"
-                        >
-                          <span
-                            className={`font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded ${itemStyle.badgeBg}`}
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectCountry(item)}
+                            className="font-semibold text-slate-800 text-left hover:text-[#00968A] inline-flex items-center gap-2 min-w-0"
                           >
-                            L{item.riskLevel}
-                          </span>
-                          <span>
-                            {item.nameEn}{" "}
-                            <span className="text-slate-400 font-normal">
-                              ({item.nameId})
+                            <span
+                              className={`font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-md shrink-0 ${itemStyle.badgeBg}`}
+                            >
+                              {itemStyle.glyph} L{item.riskLevel}
                             </span>
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleWatchlist(item.id)}
-                          className="text-slate-400 hover:text-rose-600 font-semibold px-1.5 py-0.5 rounded-md hover:bg-rose-50 transition-colors"
-                          aria-label={`Remove ${item.nameEn}`}
-                        >
-                          ✕
-                        </button>
+                            <span className="truncate">
+                              {item.nameEn}{" "}
+                              <span className="text-slate-400 font-normal">
+                                ({item.nameId})
+                              </span>
+                            </span>
+                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingNoteId(isEditing ? null : item.id);
+                                setNoteDraft(note ?? "");
+                              }}
+                              className="text-[10px] font-semibold text-slate-500 hover:text-[#00968A] px-1.5 py-0.5 rounded-md hover:bg-teal-50 transition-colors"
+                            >
+                              {note ? "Edit note" : "+ Note"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleWatchlist(item.id)}
+                              className="text-slate-400 hover:text-rose-600 font-semibold px-1.5 py-0.5 rounded-md hover:bg-rose-50 transition-colors"
+                              aria-label={`Remove ${item.nameEn}`}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                        {isEditing ? (
+                          <div className="flex gap-1.5 pt-1">
+                            <input
+                              type="text"
+                              value={noteDraft}
+                              maxLength={255}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              placeholder="Reminder note (e.g., Check visa, Lapor Diri)..."
+                              className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-[#00968A]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => saveWatchlistNote(item.id)}
+                              className="rounded-lg bg-[#00968A] text-white px-2.5 py-1 text-[11px] font-semibold hover:brightness-105"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        ) : (
+                          note && (
+                            <p className="text-[11px] text-slate-500 pl-1 truncate">
+                              Note: {note}
+                            </p>
+                          )
+                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
             </div>
-            <p className="text-[11px] text-slate-400 pt-3 border-t border-slate-100 mt-4">
+            <p className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60 mt-4">
               Single Source of Truth • Synchronized with MapLibre GL markers
             </p>
           </section>
         </div>
 
         {/* UC-7: Interactive Regional Risk Map */}
-        <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80 space-y-4">
+        <section id="map-section" className="sentinel-glass rounded-3xl p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                <Globe className="size-5 text-teal-600" /> Interactive Regional
+                <Globe className="size-5 text-[#00968A]" /> Interactive Regional
                 Risk Map (UC-7 — MapLibre GL)
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -1221,31 +1336,41 @@ export default function SentinelMapPage() {
               <button
                 type="button"
                 onClick={resetWorldView}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors shadow-2xs"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#021B43] text-white hover:bg-[#032863] transition-colors shadow-xs"
               >
                 <Compass className="size-3.5" /> Reset World View
               </button>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-900 ring-1 ring-emerald-600/20">
-                <span className="size-2 rounded-full bg-emerald-500" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50/90 text-emerald-900 ring-1 ring-emerald-600/20">
+                <span className="text-emerald-600 text-[10px]">●</span>
                 <span className="font-mono text-[11px] font-semibold">L1</span>
                 Low Risk
               </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-900 ring-1 ring-amber-600/20">
-                <span className="size-2 rounded-full bg-amber-500" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-50/90 text-amber-900 ring-1 ring-amber-600/20">
+                <span className="text-amber-600 text-[10px]">▲</span>
                 <span className="font-mono text-[11px] font-semibold">
                   L2–L3
                 </span>
                 Elevated
               </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 text-rose-900 ring-1 ring-rose-600/20">
-                <span className="size-2 rounded-full bg-rose-600" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-rose-50/90 text-rose-900 ring-1 ring-rose-600/20">
+                <span className="text-rose-600 text-[10px]">◆</span>
                 <span className="font-mono text-[11px] font-semibold">L4</span>
                 Critical
               </span>
             </div>
           </div>
 
-          <div className="relative h-[450px] w-full rounded-2xl overflow-hidden ring-1 ring-slate-200/90 shadow-md">
+          <div className="relative h-[450px] w-full rounded-2xl overflow-hidden ring-1 ring-slate-900/10 shadow-lg">
+            {/* Floating Glass Telemetry Overlay */}
+            <div className="pointer-events-none absolute bottom-3 left-3 z-10 flex items-center gap-2.5 rounded-2xl bg-[#021B43]/75 backdrop-blur-md px-3.5 py-2 text-xs text-white border border-white/15 shadow-lg">
+              <span className="font-mono text-[11px] font-semibold text-teal-300">
+                {activeTheme.glyph} {activeTheme.code}
+              </span>
+              <span className="font-semibold">{activeCountry.nameEn}</span>
+              <span className="hidden sm:inline font-mono text-[10px] text-slate-300">
+                {activeCountry.lat.toFixed(2)}°, {activeCountry.lng.toFixed(2)}°
+              </span>
+            </div>
             <Map
               theme="dark"
               viewport={viewport}
@@ -1311,7 +1436,7 @@ export default function SentinelMapPage() {
 
         {/* Conditional Result Flow: Alternative Flow vs Normal Flow */}
         {invalidQuery ? (
-          <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-amber-400/80 border-l-4 border-l-amber-500 space-y-2.5">
+          <section className="sentinel-glass rounded-3xl p-6 ring-1 ring-amber-400/70 border-l-4 border-l-amber-500 space-y-2.5">
             <span className="inline-block text-xs font-semibold uppercase tracking-wider bg-amber-50 text-amber-900 ring-1 ring-amber-500/30 px-2.5 py-1 rounded-lg">
               Alternative Flow • No Results Found
             </span>
@@ -1331,11 +1456,11 @@ export default function SentinelMapPage() {
           <section className="space-y-6">
             {/* Dynamic Risk Banner */}
             <div
-              className={`rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5 ${activeTheme.bannerBg}`}
+              className={`rounded-3xl p-6 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5 ${activeTheme.bannerBg}`}
             >
               <div className="flex items-start gap-4">
                 <div
-                  className={`p-3.5 rounded-xl shrink-0 ${activeTheme.iconWrap}`}
+                  className={`p-3.5 rounded-2xl shrink-0 ${activeTheme.iconWrap}`}
                 >
                   <ActiveIcon className="size-6" />
                 </div>
@@ -1344,7 +1469,7 @@ export default function SentinelMapPage() {
                     <span
                       className={`font-mono text-xs font-semibold px-2.5 py-0.5 rounded-full ${activeTheme.badgeBg}`}
                     >
-                      [{activeTheme.code}] {activeTheme.badge}
+                      {activeTheme.glyph} [{activeTheme.code}] {activeTheme.badge}
                     </span>
                     <span
                       className={`text-xs font-semibold uppercase tracking-wider ${activeTheme.subText}`}
@@ -1396,10 +1521,10 @@ export default function SentinelMapPage() {
             </div>
 
             {/* Alerts & KBRI Contacts Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div id="advisories-section" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Active Safety Bulletins */}
-              <div className="lg:col-span-2 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="lg:col-span-2 sentinel-glass rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
                   <h4 className="text-base font-bold tracking-tight text-slate-900">
                     Active Safety Bulletins (UC-2)
                   </h4>
@@ -1411,7 +1536,7 @@ export default function SentinelMapPage() {
                   {activeCountry.alerts.map((al) => (
                     <div
                       key={al.id}
-                      className="p-4 rounded-xl bg-slate-50/70 ring-1 ring-slate-200/80 border-l-4 border-l-teal-600 space-y-1.5"
+                      className="p-4 rounded-2xl bg-white/50 backdrop-blur-md ring-1 ring-white/80 border-l-4 border-l-[#00968A] space-y-1.5"
                     >
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-mono text-[11px] font-semibold uppercase tracking-wider bg-white text-slate-800 px-2 py-0.5 rounded-md ring-1 ring-slate-200">
@@ -1435,7 +1560,7 @@ export default function SentinelMapPage() {
               {/* Diplomatic Protection (KBRI) Card */}
               <div
                 id="kbri-card"
-                className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80 flex flex-col justify-between space-y-4"
+                className="sentinel-glass rounded-3xl p-6 flex flex-col justify-between space-y-4"
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -1456,7 +1581,7 @@ export default function SentinelMapPage() {
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-slate-50/90 rounded-xl ring-1 ring-slate-200/80 font-mono text-xs space-y-1.5">
+                <div className="p-3.5 bg-white/50 backdrop-blur-md rounded-2xl ring-1 ring-white/80 font-mono text-xs space-y-1.5">
                   <p className="font-semibold text-slate-900">
                     Hotline: {activeCountry.embassy.hotline}
                   </p>
@@ -1481,6 +1606,41 @@ export default function SentinelMapPage() {
           </section>
         )}
       </main>
+
+      {/* Mobile Floating Glass Navigation Dock (Continuity / HCI) */}
+      <nav
+        aria-label="Quick section navigation"
+        className="md:hidden fixed bottom-4 inset-x-4 z-30 flex items-center justify-around rounded-2xl bg-white/80 backdrop-blur-2xl border border-white/90 shadow-[0_12px_32px_rgba(2,27,67,0.14)] ring-1 ring-slate-900/5 px-2 py-2"
+      >
+        <a
+          href="#search-section"
+          className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[11px] font-semibold text-slate-700 hover:text-[#00968A]"
+        >
+          <Search className="size-4" />
+          <span>Search</span>
+        </a>
+        <a
+          href="#map-section"
+          className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[11px] font-semibold text-slate-700 hover:text-[#00968A]"
+        >
+          <Globe className="size-4" />
+          <span>Map</span>
+        </a>
+        <a
+          href="#advisories-section"
+          className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[11px] font-semibold text-slate-700 hover:text-[#00968A]"
+        >
+          <ShieldAlert className="size-4" />
+          <span>Alerts</span>
+        </a>
+        <a
+          href="#checklist-section"
+          className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[11px] font-semibold text-slate-700 hover:text-[#00968A]"
+        >
+          <CheckCircle2 className="size-4" />
+          <span>Checklist</span>
+        </a>
+      </nav>
     </div>
   );
 }

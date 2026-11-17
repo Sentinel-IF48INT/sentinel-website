@@ -399,7 +399,7 @@ export default function LoginModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-md transition-opacity p-4 animate-in fade-in duration-150 font-sans"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#021B43]/35 backdrop-blur-md transition-opacity p-4 animate-in fade-in duration-150 font-sans"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -409,7 +409,7 @@ export default function LoginModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="login-title"
-        className="relative w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5 p-6 sm:p-8 animate-in zoom-in-95 duration-150"
+        className="relative w-full max-w-md max-h-[92vh] overflow-y-auto rounded-3xl bg-white/90 backdrop-blur-2xl border border-white/80 shadow-[0_24px_64px_-12px_rgba(2,27,67,0.28)] ring-1 ring-slate-900/5 p-6 sm:p-8 animate-in zoom-in-95 duration-150"
       >
         {/* Close Button */}
         <button
@@ -426,7 +426,7 @@ export default function LoginModal({
         <div
           role="tablist"
           aria-label="Authentication mode"
-          className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 mb-5 mr-8"
+          className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100/85 p-1 mb-5 mr-8 ring-1 ring-slate-200/60"
         >
           <button
             id="auth-tab-signin"

@@ -150,7 +150,7 @@ export function DocumentChecklist({
   };
 
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80">
+    <div id="checklist-section" className="sentinel-glass rounded-3xl p-6 sm:p-7">
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/20">
@@ -252,7 +252,7 @@ export function DocumentChecklist({
                     ? "bg-emerald-50/80 ring-1 ring-emerald-500/30"
                     : isCriticalLaporDiri
                       ? "bg-rose-50/35 ring-1 ring-rose-200/80 hover:bg-rose-50/60"
-                      : "bg-slate-50/70 ring-1 ring-slate-200/80 hover:bg-slate-100/70"
+                      : "bg-white/50 backdrop-blur-md ring-1 ring-white/80 hover:bg-white/75"
                 }`}
               >
                 <span
